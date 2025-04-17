@@ -8,7 +8,7 @@ set(POSTGRESQL_ROOT "C:/Program Files/PostgreSQL/17")
 include_directories("${POSTGRESQL_ROOT}/include")
 link_directories("${POSTGRESQL_ROOT}/lib")
 
-# === GTK Setup (via pkg-config) ===
+
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(GTK3 REQUIRED gtk+-3.0)
 
@@ -16,7 +16,7 @@ include_directories(${GTK3_INCLUDE_DIRS})
 link_directories(${GTK3_LIBRARY_DIRS})
 add_definitions(${GTK3_CFLAGS_OTHER})
 
-# === Executable and Linking ===
+
 add_executable(X_RR
         main.c
         env_loader.c
@@ -26,9 +26,10 @@ add_executable(X_RR
 target_link_libraries(X_RR
         ${GTK3_LIBRARIES}
         libpq
+        ws2_32
 )
 
-# === WINDOWS: Copy PostgreSQL DLLs ===
+# === Copy PostgreSQL DLLs ===
 if (WIN32)
     set(DLL_FILES
             "${POSTGRESQL_ROOT}/bin/libpq.dll"
