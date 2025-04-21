@@ -1,4 +1,4 @@
-// === Updated main.c for GTK 3 compatibility (Windows) ===
+// === Updated main.c with improved GTK GUI and CSS ===
 #include <gtk/gtk.h>
 #include <libpq-fe.h>
 #include <pthread.h>
@@ -103,15 +103,30 @@ void send_message(GtkButton *button, gpointer entry) {
     gtk_entry_set_text(GTK_ENTRY(entry), "");
 }
 
+void load_css() {
+    GtkCssProvider *provider = gtk_css_provider_new();
+    gtk_css_provider_load_from_data(provider,
+        "window { background-color: #2f3136; color: white; }\n"
+        "textview, entry { background-color: #40444b; color: white; border-radius: 6px; padding: 6px; }\n"
+        "button { background-color: #5865f2; color: white; border-radius: 6px; padding: 6px; }\n"
+        "button:hover { background-color: #4752c4; }\n",
+        -1, NULL);
+
+    GtkStyleContext *context = gtk_style_context_new();
+    gtk_style_context_add_provider_for_screen(gdk_screen_get_default(),
+        GTK_STYLE_PROVIDER(provider), GTK_STYLE_PROVIDER_PRIORITY_USER);
+}
+
 void start_gui() {
     GtkWidget *window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
     gtk_window_set_title(GTK_WINDOW(window), "Chat Client");
-    gtk_window_set_default_size(GTK_WINDOW(window), 400, 300);
+    gtk_window_set_default_size(GTK_WINDOW(window), 500, 400);
 
     GtkWidget *vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
     gtk_container_add(GTK_CONTAINER(window), vbox);
 
     GtkWidget *scroll = gtk_scrolled_window_new(NULL, NULL);
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll), GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
     GtkWidget *view = gtk_text_view_new();
     text_buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(view));
     gtk_text_view_set_editable(GTK_TEXT_VIEW(view), FALSE);
@@ -119,14 +134,17 @@ void start_gui() {
     gtk_container_add(GTK_CONTAINER(scroll), view);
     gtk_box_pack_start(GTK_BOX(vbox), scroll, TRUE, TRUE, 0);
 
+    GtkWidget *hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
     GtkWidget *entry = gtk_entry_new();
-    gtk_box_pack_start(GTK_BOX(vbox), entry, FALSE, FALSE, 0);
-
     GtkWidget *button = gtk_button_new_with_label("Send");
-    gtk_box_pack_start(GTK_BOX(vbox), button, FALSE, FALSE, 0);
-    g_signal_connect(button, "clicked", G_CALLBACK(send_message), entry);
+    gtk_box_pack_start(GTK_BOX(hbox), entry, TRUE, TRUE, 0);
+    gtk_box_pack_start(GTK_BOX(hbox), button, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(vbox), hbox, FALSE, FALSE, 0);
 
+    g_signal_connect(button, "clicked", G_CALLBACK(send_message), entry);
     g_signal_connect(window, "destroy", G_CALLBACK(gtk_main_quit), NULL);
+
+    load_css();
     gtk_widget_show_all(window);
 }
 
@@ -143,12 +161,10 @@ int main(int argc, char *argv[]) {
     gtk_dialog_run(GTK_DIALOG(dialog));
     gtk_widget_destroy(dialog);
 
-    // Start server in a thread
     pthread_t server_thread;
     pthread_create(&server_thread, NULL, (void*(*)(void*))start_server, NULL);
     pthread_detach(server_thread);
 
-    // Start GTK client GUI
     start_gui();
     gtk_main();
 
