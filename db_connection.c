@@ -1,12 +1,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <libpq-fe.h>
-#include <gtk/gtk.h>
 #include "env_loader.h"
 #include "db_connection.h"
 
 PGconn* connect_to_db() {
-    load_env_file(".env");
+    load_env(".env");
 
     const char *host = getenv("PG_HOST");
     const char *port = getenv("PG_PORT");
@@ -15,11 +14,12 @@ PGconn* connect_to_db() {
     const char *password = getenv("PG_PASSWORD");
 
     if (!host || !port || !dbname || !user || !password) {
-        GtkWidget *dialog = gtk_message_dialog_new(NULL, GTK_DIALOG_DESTROY_WITH_PARENT,
-                                                   GTK_MESSAGE_ERROR, GTK_BUTTONS_CLOSE,
-                                                   "Missing environment variables!");
-        gtk_dialog_run(GTK_DIALOG(dialog));
-        gtk_widget_destroy(dialog);
+        fprintf(stderr, "❌ Missing one or more required environment variables:\n");
+        if (!host) fprintf(stderr, "   - PG_HOST is missing\n");
+        if (!port) fprintf(stderr, "   - PG_PORT is missing\n");
+        if (!dbname) fprintf(stderr, "   - PG_DB is missing\n");
+        if (!user) fprintf(stderr, "   - PG_USER is missing\n");
+        if (!password) fprintf(stderr, "   - PG_PASSWORD is missing\n");
         return NULL;
     }
 
@@ -31,14 +31,11 @@ PGconn* connect_to_db() {
     PGconn *conn = PQconnectdb(conninfo);
 
     if (PQstatus(conn) != CONNECTION_OK) {
-        GtkWidget *dialog = gtk_message_dialog_new(NULL, GTK_DIALOG_DESTROY_WITH_PARENT,
-                                                   GTK_MESSAGE_ERROR, GTK_BUTTONS_CLOSE,
-                                                   "Connection failed: %s", PQerrorMessage(conn));
-        gtk_dialog_run(GTK_DIALOG(dialog));
-        gtk_widget_destroy(dialog);
+        fprintf(stderr, "❌ Database connection failed: %s\n", PQerrorMessage(conn));
         PQfinish(conn);
         return NULL;
     }
 
+    printf("✅ Connected to database successfully.\n");
     return conn;
 }

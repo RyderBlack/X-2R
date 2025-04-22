@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdbool.h> // Add this
 
 #ifdef _WIN32
 #include <windows.h>
@@ -14,11 +15,11 @@ int setenv_wrapper(const char* key, const char* value, int overwrite) {
 }
 #endif
 
-void load_env_file(const char* filename) {
+bool load_env(const char* filename) {
     FILE* file = fopen(filename, "r");
     if (!file) {
         perror("Could not open .env file");
-        return;
+        return false;
     }
 
     char line[512];
@@ -37,11 +38,7 @@ void load_env_file(const char* filename) {
         char* key = line;
         char* value = equals + 1;
 
-        // DEBUG: Print loaded key-value pairs
-        // printf("Loaded env: %s = %s\n", key, value);
-
 #ifdef _WIN32
-        // Windows uses a single string "KEY=value" for _putenv
         char env_string[512];
         snprintf(env_string, sizeof(env_string), "%s=%s", key, value);
         _putenv(env_string);
@@ -51,4 +48,5 @@ void load_env_file(const char* filename) {
     }
 
     fclose(file);
+    return true;
 }

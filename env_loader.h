@@ -1,6 +1,7 @@
 #ifndef ENV_LOADER_H
 #define ENV_LOADER_H
 
-void load_env_file(const char* filename);
+#include <stdbool.h>
+bool load_env(const char* filename);
 
-#endif // ENV_LOADER_H
+#endif

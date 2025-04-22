@@ -3,33 +3,48 @@ project(X_RR C)
 
 set(CMAKE_C_STANDARD 23)
 
-# === PostgreSQL Setup ===
-set(POSTGRESQL_ROOT "C:/Program Files/PostgreSQL/17")
-include_directories("${POSTGRESQL_ROOT}/include")
-link_directories("${POSTGRESQL_ROOT}/lib")
+# === PostgreSQL Setup for Server ===
+if (WIN32)
+    set(POSTGRESQL_ROOT "C:/Program Files/PostgreSQL/17")
+    include_directories("${POSTGRESQL_ROOT}/include")
+    link_directories("${POSTGRESQL_ROOT}/lib")
+endif()
 
-
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(GTK3 REQUIRED gtk+-3.0)
-
-include_directories(${GTK3_INCLUDE_DIRS})
-link_directories(${GTK3_LIBRARY_DIRS})
-add_definitions(${GTK3_CFLAGS_OTHER})
-
-
-add_executable(X_RR
-        main.c
+# === Common Source Files ===
+set(COMMON_SOURCES
         env_loader.c
+        platform.h
+)
+
+# === Server Target ===
+add_executable(server
+        main_server.c
         db_connection.c
+        ${COMMON_SOURCES}
 )
 
-target_link_libraries(X_RR
-        ${GTK3_LIBRARIES}
-        libpq
-        ws2_32
+# === Client Target ===
+add_executable(client
+        main_client.c
+        ${COMMON_SOURCES}
 )
 
-# === Copy PostgreSQL DLLs ===
+# === Link Libraries ===
+if (WIN32)
+    # Server needs PostgreSQL and Winsock
+    target_link_libraries(server libpq ws2_32)
+
+    # Client only needs Winsock
+    target_link_libraries(client ws2_32)
+else()
+    # On Linux, use 'pq' for PostgreSQL
+    target_link_libraries(server pq)
+
+    # No extra libs needed for client
+    target_link_libraries(client)
+endif()
+
+# === Copy PostgreSQL DLLs (Windows only) ===
 if (WIN32)
     set(DLL_FILES
             "${POSTGRESQL_ROOT}/bin/libpq.dll"
@@ -42,9 +57,10 @@ if (WIN32)
 
     foreach(DLL ${DLL_FILES})
         message(STATUS "Looking for DLL: ${DLL}")
-        add_custom_command(TARGET X_RR POST_BUILD
+        # Copy DLLs for server
+        add_custom_command(TARGET server POST_BUILD
                 COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${DLL}" $<TARGET_FILE_DIR:X_RR>
+                "${DLL}" $<TARGET_FILE_DIR:server>
         )
     endforeach()
 endif()
