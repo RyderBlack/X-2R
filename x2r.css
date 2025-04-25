@@ -1,0 +1,115 @@
+/* Base window */
+window {
+    background: linear-gradient(to bottom right, #000000, #1a1a1a);
+    color: white;
+    font-family: Arial, sans-serif;
+}
+
+/* Sidebar */
+#sidebar {
+    background-color: #111111;
+    padding: 12px;
+}
+
+#sidebar label {
+    color: #e11d48;
+    font-size: 18px;
+    font-weight: bold;
+    margin-bottom: 10px;
+}
+
+/* Buttons in sidebar (channels + DMs) */
+.channel,
+.dm-button {
+    background-color: #1a1a1a;
+    color: white;
+    border-radius: 6px;
+    padding: 8px 10px;
+    margin-bottom: 5px;
+    text-align: left;
+}
+
+.channel:hover,
+.dm-button:hover {
+    background-color: #e11d48;
+    color: white;
+}
+
+/* Active channel button */
+.channel.active {
+    background-color: #e11d48;
+    color: white;
+}
+
+/* Header bar */
+#header {
+    background-color: rgba(255, 255, 255, 0.05);
+    padding: 12px;
+    font-weight: bold;
+    font-size: 16px;
+}
+
+/* Message bubble */
+.message {
+    background-color: rgba(255, 255, 255, 0.05);
+    border-radius: 8px;
+    padding: 10px;
+    margin-bottom: 12px;
+    max-width: 60%;
+}
+
+/* Message username */
+.message strong {
+    color: #e11d48;
+}
+
+/* Message time */
+.message time {
+    font-size: 11px;
+    color: #aaa;
+    display: block;
+    margin-top: 4px;
+}
+
+/* Input area */
+#input-area {
+    background-color: #0f0f0f;
+    padding: 12px;
+}
+
+#input-area entry {
+    background-color: rgba(255, 255, 255, 0.1);
+    border-radius: 20px;
+    padding: 6px 12px;
+    color: white;
+    border: none;
+}
+
+/* Send button */
+.send-button {
+    background-color: #e11d48;
+    color: white;
+    border: none;
+    border-radius: 20px;
+    padding: 6px 12px;
+    margin-left: 8px;
+}
+
+/* Friend list */
+#friends-list {
+    background-color: #222;
+    padding: 12px;
+}
+
+.friend {
+    background-color: #333;
+    border-radius: 6px;
+    padding: 6px;
+    margin-bottom: 8px;
+    color: white;
+}
+
+.friend image {
+    border-radius: 50%;
+    margin-right: 6px;
+}
