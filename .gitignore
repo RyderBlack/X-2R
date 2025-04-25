@@ -53,6 +53,7 @@ dkms.conf
 cmake-build-debug/
 cmake-build-debug/.env
 .idea
+build/
 
 .env
 *.env
