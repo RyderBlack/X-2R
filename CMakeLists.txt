@@ -14,6 +14,8 @@ endif()
 set(COMMON_SOURCES
         env_loader.c
         platform.h
+        protocol.c
+        protocol.h
 )
 
 # === Server Target ===
@@ -29,6 +31,12 @@ add_executable(client
         ${COMMON_SOURCES}
 )
 
+# === GTK App Target ===
+add_executable(gtk_app
+        gtk_app.c
+        ${COMMON_SOURCES}
+)
+
 # === Link Libraries ===
 if (WIN32)
     # Server needs PostgreSQL and Winsock
@@ -36,12 +44,24 @@ if (WIN32)
 
     # Client only needs Winsock
     target_link_libraries(client ws2_32)
+
+    # GTK App needs GTK, Winsock, and pthread
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(GTK3 REQUIRED gtk+-3.0)
+    include_directories(${GTK3_INCLUDE_DIRS})
+    target_link_libraries(gtk_app ${GTK3_LIBRARIES} ws2_32 pthread)
 else()
     # On Linux, use 'pq' for PostgreSQL
     target_link_libraries(server pq)
 
     # No extra libs needed for client
     target_link_libraries(client)
+
+    # GTK App needs GTK and pthread
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(GTK3 REQUIRED gtk+-3.0)
+    include_directories(${GTK3_INCLUDE_DIRS})
+    target_link_libraries(gtk_app ${GTK3_LIBRARIES} pthread)
 endif()
 
 # === Copy PostgreSQL DLLs (Windows only) ===
