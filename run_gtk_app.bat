@@ -14,6 +14,18 @@ copy "%GTK_PATH%\libpango-1.0-0.dll" .
 copy "%GTK_PATH%\libpangocairo-1.0-0.dll" .
 copy "%GTK_PATH%\libgdk_pixbuf-2.0-0.dll" .
 copy "%GTK_PATH%\libatk-1.0-0.dll" .
+copy "%GTK_PATH%\libepoxy-0.dll" .
+copy "%GTK_PATH%\libffi-8.dll" .
+copy "%GTK_PATH%\libgio-2.0-0.dll" .
+copy "%GTK_PATH%\libgmodule-2.0-0.dll" .
+copy "%GTK_PATH%\libharfbuzz-0.dll" .
+copy "%GTK_PATH%\libintl-8.dll" .
+copy "%GTK_PATH%\libpangoft2-1.0-0.dll" .
+copy "%GTK_PATH%\libpangowin32-1.0-0.dll" .
+copy "%GTK_PATH%\libpcre-1.dll" .
+copy "%GTK_PATH%\libpixman-1-0.dll" .
+copy "%GTK_PATH%\libpng16-16.dll" .
+copy "%GTK_PATH%\libz.dll" .
 
 :: Lancer l'application
 .\gtk_app.exe

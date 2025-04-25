@@ -1,5 +1,12 @@
 #include <gtk/gtk.h>
 #include <string.h>
+#include <pthread.h>
+#include <time.h>
+#include "platform.h"
+#include "env_loader.h"
+#include "protocol.h"
+
+#define BUFFER_SIZE 1024
 
 // Structure pour stocker les widgets principaux
 typedef struct
@@ -19,38 +26,255 @@ typedef struct
     GtkWidget *chat_history;
     GtkWidget *chat_channels_list;
     GtkWidget *contacts_list;
+    SOCKET server_socket;
+    pthread_t receive_thread;
+    bool is_running;
+    uint32_t current_channel_id;
+    char username[32];
 } AppWidgets;
 
-// Fonction de callback pour le bouton de connexion
-static void on_login_button_clicked(GtkButton *button, gpointer user_data)
-{
+// Function to show error dialog
+static void show_error_dialog(GtkWidget *parent, const char *message) {
+    GtkWidget *dialog = gtk_message_dialog_new(GTK_WINDOW(parent),
+                                             GTK_DIALOG_DESTROY_WITH_PARENT,
+                                             GTK_MESSAGE_ERROR,
+                                             GTK_BUTTONS_CLOSE,
+                                             "%s", message);
+    gtk_dialog_run(GTK_DIALOG(dialog));
+    gtk_widget_destroy(dialog);
+}
+
+// Function to update user list
+static gboolean update_user_list(gpointer data) {
+    UserInfo *users = (UserInfo *)data;
+    AppWidgets *widgets = (AppWidgets *)g_object_get_data(G_OBJECT(widgets->window), "widgets");
+    
+    // Clear existing users
+    GList *children = gtk_container_get_children(GTK_CONTAINER(widgets->contacts_list));
+    for (GList *iter = children; iter != NULL; iter = iter->next) {
+        gtk_widget_destroy(GTK_WIDGET(iter->data));
+    }
+    g_list_free(children);
+    
+    // Add new users
+    for (int i = 0; i < 10; i++) { // Assuming max 10 users for now
+        if (strlen(users[i].username) == 0) break;
+        
+        char user_text[64];
+        snprintf(user_text, sizeof(user_text), "%s (%s)", users[i].username, 
+                users[i].status == STATUS_ONLINE ? "online" : 
+                users[i].status == STATUS_AWAY ? "away" : "offline");
+        
+        GtkWidget *user_label = gtk_label_new(user_text);
+        gtk_widget_set_halign(user_label, GTK_ALIGN_START);
+        gtk_widget_set_margin_start(user_label, 10);
+        gtk_list_box_insert(GTK_LIST_BOX(widgets->contacts_list), user_label, -1);
+    }
+    
+    free(users);
+    return G_SOURCE_REMOVE;
+}
+
+// Function to update channel list
+static gboolean update_channel_list(gpointer data) {
+    ChannelInfo *channels = (ChannelInfo *)data;
+    AppWidgets *widgets = (AppWidgets *)g_object_get_data(G_OBJECT(widgets->window), "widgets");
+    
+    // Clear existing channels
+    GList *children = gtk_container_get_children(GTK_CONTAINER(widgets->chat_channels_list));
+    for (GList *iter = children; iter != NULL; iter = iter->next) {
+        gtk_widget_destroy(GTK_WIDGET(iter->data));
+    }
+    g_list_free(children);
+    
+    // Add new channels
+    for (int i = 0; i < 10; i++) { // Assuming max 10 channels for now
+        if (strlen(channels[i].name) == 0) break;
+        
+        char channel_text[64];
+        snprintf(channel_text, sizeof(channel_text), "#%s%s", 
+                channels[i].name,
+                channels[i].is_private ? " (private)" : "");
+        
+        GtkWidget *channel_label = gtk_label_new(channel_text);
+        gtk_widget_set_halign(channel_label, GTK_ALIGN_START);
+        gtk_widget_set_margin_start(channel_label, 10);
+        gtk_list_box_insert(GTK_LIST_BOX(widgets->chat_channels_list), channel_label, -1);
+    }
+    
+    free(channels);
+    return G_SOURCE_REMOVE;
+}
+
+// Function to safely update the UI from the receive thread
+static gboolean update_chat_history(gpointer data) {
+    ChatMessage *msg = (ChatMessage *)data;
+    AppWidgets *widgets = (AppWidgets *)g_object_get_data(G_OBJECT(widgets->window), "widgets");
+    
+    GtkTextBuffer *buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(widgets->chat_history));
+    GtkTextIter end;
+    
+    // Get current time
+    time_t now = time(NULL);
+    struct tm *tm_info = localtime(&now);
+    char time_str[20];
+    strftime(time_str, sizeof(time_str), "%H:%M:%S", tm_info);
+    
+    // Format message with timestamp
+    char formatted_msg[BUFFER_SIZE];
+    snprintf(formatted_msg, sizeof(formatted_msg), "[%s] %s: %s\n", 
+             time_str, msg->sender_username, msg->content);
+    
+    gtk_text_buffer_get_end_iter(buffer, &end);
+    gtk_text_buffer_insert(buffer, &end, formatted_msg, -1);
+    
+    free(msg);
+    return G_SOURCE_REMOVE;
+}
+
+// Thread function to receive messages
+static void* receive_messages(void* arg) {
+    AppWidgets *widgets = (AppWidgets *)arg;
+    
+    while (widgets->is_running) {
+        Message* msg = receive_message(widgets->server_socket);
+        if (!msg) {
+            if (widgets->is_running) { // Only show error if not shutting down
+                g_idle_add((GSourceFunc)show_error_dialog, widgets->window);
+            }
+            break;
+        }
+        
+        switch (msg->type) {
+            case MSG_CHAT: {
+                ChatMessage* chat_msg = malloc(sizeof(ChatMessage));
+                memcpy(chat_msg, msg->payload, sizeof(ChatMessage));
+                g_idle_add((GSourceFunc)update_chat_history, chat_msg);
+                break;
+            }
+            case MSG_USER_LIST: {
+                UserInfo* users = malloc(sizeof(UserInfo) * 10); // Max 10 users
+                memcpy(users, msg->payload, sizeof(UserInfo) * 10);
+                g_idle_add((GSourceFunc)update_user_list, users);
+                break;
+            }
+            case MSG_CHANNEL_LIST: {
+                ChannelInfo* channels = malloc(sizeof(ChannelInfo) * 10); // Max 10 channels
+                memcpy(channels, msg->payload, sizeof(ChannelInfo) * 10);
+                g_idle_add((GSourceFunc)update_channel_list, channels);
+                break;
+            }
+            case MSG_ERROR: {
+                ErrorCode* error = (ErrorCode*)msg->payload;
+                char error_msg[256];
+                switch (*error) {
+                    case ERR_AUTH_FAILED:
+                        strcpy(error_msg, "Authentication failed");
+                        break;
+                    case ERR_INVALID_CHANNEL:
+                        strcpy(error_msg, "Invalid channel");
+                        break;
+                    case ERR_NOT_AUTHORIZED:
+                        strcpy(error_msg, "Not authorized");
+                        break;
+                    default:
+                        strcpy(error_msg, "Server error");
+                }
+                g_idle_add((GSourceFunc)show_error_dialog, error_msg);
+                break;
+            }
+        }
+        
+        free(msg);
+    }
+    
+    return NULL;
+}
+
+// Function to handle window close
+static gboolean on_window_delete(GtkWidget *widget, GdkEvent *event, gpointer data) {
+    AppWidgets *widgets = (AppWidgets *)data;
+    widgets->is_running = false;
+    
+    // Close the socket to wake up the receive thread
+    CLOSE_SOCKET(widgets->server_socket);
+    
+    // Wait for the receive thread to finish
+    pthread_join(widgets->receive_thread, NULL);
+    
+    return FALSE; // Allow the window to close
+}
+
+// Function to handle login
+static void on_login_button_clicked(GtkButton *button, gpointer user_data) {
     AppWidgets *widgets = (AppWidgets *)user_data;
     const gchar *username = gtk_entry_get_text(GTK_ENTRY(widgets->username_entry));
     const gchar *password = gtk_entry_get_text(GTK_ENTRY(widgets->password_entry));
-
-    // Ici, vous pouvez ajouter votre logique d'authentification
-    if (strlen(username) > 0 && strlen(password) > 0)
-    {
+    
+    if (strlen(username) > 0 && strlen(password) > 0) {
+        // Send authentication message
+        Message* auth_msg = create_auth_message(username, password);
+        if (send_message(widgets->server_socket, auth_msg) < 0) {
+            show_error_dialog(widgets->window, "Failed to send authentication");
+        }
+        free(auth_msg);
+        
+        // Store username
+        strncpy(widgets->username, username, sizeof(widgets->username) - 1);
+        
+        // Switch to chat view
         gtk_stack_set_visible_child_name(GTK_STACK(widgets->stack), "chat");
     }
 }
 
-// Fonction de callback pour envoyer un message
-static void on_send_message(GtkButton *button, gpointer user_data)
-{
+// Function to handle channel selection
+static void on_channel_selected(GtkListBox *list, GtkListBoxRow *row, gpointer user_data) {
+    AppWidgets *widgets = (AppWidgets *)user_data;
+    if (!row) return;
+    
+    GtkWidget *label = gtk_bin_get_child(GTK_BIN(row));
+    const gchar *channel_name = gtk_label_get_text(GTK_LABEL(label));
+    
+    // Extract channel ID from the label (assuming format "#channel_name")
+    uint32_t channel_id = atoi(channel_name + 1); // Skip the '#'
+    
+    if (channel_id != widgets->current_channel_id) {
+        // Leave current channel
+        if (widgets->current_channel_id != 0) {
+            Message* leave_msg = create_leave_channel_message(widgets->current_channel_id);
+            send_message(widgets->server_socket, leave_msg);
+            free(leave_msg);
+        }
+        
+        // Join new channel
+        Message* join_msg = create_join_channel_message(channel_id);
+        if (send_message(widgets->server_socket, join_msg) < 0) {
+            show_error_dialog(widgets->window, "Failed to join channel");
+        }
+        free(join_msg);
+        
+        widgets->current_channel_id = channel_id;
+        
+        // Update chat input placeholder
+        char placeholder[64];
+        snprintf(placeholder, sizeof(placeholder), "Envoyer un message à %s", channel_name);
+        gtk_entry_set_placeholder_text(GTK_ENTRY(widgets->chat_input), placeholder);
+    }
+}
+
+// Function to handle message sending
+static void on_send_message(GtkButton *button, gpointer user_data) {
     AppWidgets *widgets = (AppWidgets *)user_data;
     const gchar *message = gtk_entry_get_text(GTK_ENTRY(widgets->chat_input));
-
-    if (strlen(message) > 0)
-    {
-        GtkTextBuffer *buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(widgets->chat_history));
-        GtkTextIter end;
-
-        gtk_text_buffer_get_end_iter(buffer, &end);
-        gtk_text_buffer_insert(buffer, &end, "Vous: ", -1);
-        gtk_text_buffer_insert(buffer, &end, message, -1);
-        gtk_text_buffer_insert(buffer, &end, "\n", -1);
-
+    
+    if (strlen(message) > 0 && widgets->current_channel_id != 0) {
+        // Send message to server
+        Message* chat_msg = create_chat_message(widgets->current_channel_id, message);
+        if (send_message(widgets->server_socket, chat_msg) < 0) {
+            show_error_dialog(widgets->window, "Failed to send message");
+        }
+        free(chat_msg);
+        
         gtk_entry_set_text(GTK_ENTRY(widgets->chat_input), "");
     }
 }
@@ -296,11 +520,44 @@ int main(int argc, char *argv[])
 {
     gtk_init(&argc, &argv);
 
+    // Initialize networking
+    INIT_NETWORKING();
+
+    // Create socket
+    SOCKET sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (sock < 0) {
+        perror("Socket creation failed");
+        return 1;
+    }
+
+    // Connect to server
+    struct sockaddr_in serv_addr;
+    serv_addr.sin_family = AF_INET;
+    serv_addr.sin_port = htons(8080);
+    inet_pton(AF_INET, "127.0.0.1", &serv_addr.sin_addr);
+
+    if (connect(sock, (struct sockaddr*)&serv_addr, sizeof(serv_addr)) < 0) {
+        perror("Connection failed");
+        CLOSE_SOCKET(sock);
+        return 1;
+    }
+
     // Création de la fenêtre principale
     AppWidgets widgets;
+    widgets.server_socket = sock;
+    widgets.is_running = true;
+    widgets.current_channel_id = 0;
+    
+    // Create the window first
     widgets.window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
     gtk_window_set_title(GTK_WINDOW(widgets.window), "Diskorde");
     gtk_window_set_default_size(GTK_WINDOW(widgets.window), 1000, 600);
+    
+    // Now that the window is created, we can store the widgets pointer
+    g_object_set_data(G_OBJECT(widgets.window), "widgets", &widgets);
+    
+    // Connect the delete event to handle cleanup
+    g_signal_connect(widgets.window, "delete-event", G_CALLBACK(on_window_delete), &widgets);
     g_signal_connect(widgets.window, "destroy", G_CALLBACK(gtk_main_quit), NULL);
 
     // Création du stack pour gérer les pages
@@ -340,8 +597,22 @@ int main(int argc, char *argv[])
                                               GTK_STYLE_PROVIDER(provider),
                                               GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
 
+    // Start the receive thread
+    if (pthread_create(&widgets.receive_thread, NULL, receive_messages, &widgets) != 0) {
+        perror("Failed to create receive thread");
+        CLOSE_SOCKET(sock);
+        return 1;
+    }
+
+    // Add channel selection handler
+    g_signal_connect(widgets.chat_channels_list, "row-activated", 
+                    G_CALLBACK(on_channel_selected), &widgets);
+
     gtk_widget_show_all(widgets.window);
     gtk_main();
+
+    // Cleanup
+    CLEANUP_NETWORKING();
 
     return 0;
 }
