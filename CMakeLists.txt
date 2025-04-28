@@ -18,6 +18,7 @@ set(COMMON_SOURCES
         protocol.h
         db_connection.c
         db_connection.h
+        encryption.c
 )
 
 # === Server Target ===

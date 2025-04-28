@@ -8,6 +8,7 @@
 #include "env_loader.h"
 #include "protocol.h"
 #include "db_connection.h"
+#include "encryption.h"
 
 #define BUFFER_SIZE 1024
 
@@ -216,25 +217,39 @@ static void on_login_button_clicked(GtkButton *button, gpointer user_data) {
     const gchar *password = gtk_entry_get_text(GTK_ENTRY(widgets->password_entry));
     
     if (strlen(username) > 0 && strlen(password) > 0) {
-        // Check credentials in database
-        const char *query = "SELECT user_id FROM users WHERE email = $1 AND password = $2";
-        const char *params[2] = {username, password};
-        PGresult *res = PQexecParams(widgets->db_conn, query, 2, NULL, params, NULL, NULL, 0);
+        // Get user from database
+        const char *query = "SELECT user_id, password FROM users WHERE email = $1";
+        const char *params[1] = {username};
+        PGresult *res = PQexecParams(widgets->db_conn, query, 1, NULL, params, NULL, NULL, 0);
         
         if (PQresultStatus(res) == PGRES_TUPLES_OK && PQntuples(res) > 0) {
-            printf("✅ Login successful for user: %s\n", username);
+            // Get stored encrypted password
+            const char *stored_password = PQgetvalue(res, 0, 1);
             
-            // Update user status to online
-            const char *update_query = "UPDATE users SET status = 'online' WHERE email = $1";
-            const char *update_params[1] = {username};
-            PGresult *update_res = PQexecParams(widgets->db_conn, update_query, 1, NULL, update_params, NULL, NULL, 0);
-            PQclear(update_res);
+            // Decrypt stored password
+            char decrypted_password[256];
+            xor_decrypt(stored_password, decrypted_password, strlen(stored_password));
+            decrypted_password[strlen(stored_password)] = '\0';
             
-            // Store username
-            strncpy(widgets->username, username, sizeof(widgets->username) - 1);
-            
-            // Switch to chat view
-            gtk_stack_set_visible_child_name(GTK_STACK(widgets->stack), "chat");
+            // Compare passwords
+            if (strcmp(password, decrypted_password) == 0) {
+                printf("✅ Login successful for user: %s\n", username);
+                
+                // Update user status to online
+                const char *update_query = "UPDATE users SET status = 'online' WHERE email = $1";
+                const char *update_params[1] = {username};
+                PGresult *update_res = PQexecParams(widgets->db_conn, update_query, 1, NULL, update_params, NULL, NULL, 0);
+                PQclear(update_res);
+                
+                // Store username
+                strncpy(widgets->username, username, sizeof(widgets->username) - 1);
+                
+                // Switch to chat view
+                gtk_stack_set_visible_child_name(GTK_STACK(widgets->stack), "chat");
+            } else {
+                printf("❌ Login failed for user: %s\n", username);
+                show_error_dialog(widgets->window, "Invalid username or password");
+            }
         } else {
             printf("❌ Login failed for user: %s\n", username);
             show_error_dialog(widgets->window, "Invalid username or password");
@@ -340,9 +355,14 @@ static void on_register_button_clicked(GtkButton *button, gpointer user_data)
         }
         PQclear(check_res);
         
-        // Insert new user
+        // Encrypt password
+        char encrypted_password[256];
+        xor_encrypt(password, encrypted_password, strlen(password));
+        encrypted_password[strlen(password)] = '\0';
+        
+        // Insert new user with encrypted password
         const char *insert_query = "INSERT INTO users (first_name, last_name, email, password, status) VALUES ($1, $2, $3, $4, 'offline')";
-        const char *insert_params[4] = {firstname, lastname, email, password};
+        const char *insert_params[4] = {firstname, lastname, email, encrypted_password};
         PGresult *insert_res = PQexecParams(widgets->db_conn, insert_query, 4, NULL, insert_params, NULL, NULL, 0);
         
         if (PQresultStatus(insert_res) == PGRES_COMMAND_OK) {
