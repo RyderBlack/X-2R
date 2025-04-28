@@ -16,12 +16,13 @@ set(COMMON_SOURCES
         platform.h
         protocol.c
         protocol.h
+        db_connection.c
+        db_connection.h
 )
 
 # === Server Target ===
 add_executable(server
         main_server.c
-        db_connection.c
         ${COMMON_SOURCES}
 )
 
@@ -45,11 +46,11 @@ if (WIN32)
     # Client only needs Winsock
     target_link_libraries(client ws2_32)
 
-    # GTK App needs GTK, Winsock, and pthread
+    # GTK App needs GTK, Winsock, pthread, and PostgreSQL
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(GTK3 REQUIRED gtk+-3.0)
     include_directories(${GTK3_INCLUDE_DIRS})
-    target_link_libraries(gtk_app ${GTK3_LIBRARIES} ws2_32 pthread)
+    target_link_libraries(gtk_app ${GTK3_LIBRARIES} ws2_32 pthread libpq)
 else()
     # On Linux, use 'pq' for PostgreSQL
     target_link_libraries(server pq)
@@ -57,11 +58,11 @@ else()
     # No extra libs needed for client
     target_link_libraries(client)
 
-    # GTK App needs GTK and pthread
+    # GTK App needs GTK, pthread, and PostgreSQL
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(GTK3 REQUIRED gtk+-3.0)
     include_directories(${GTK3_INCLUDE_DIRS})
-    target_link_libraries(gtk_app ${GTK3_LIBRARIES} pthread)
+    target_link_libraries(gtk_app ${GTK3_LIBRARIES} pthread pq)
 endif()
 
 # === Copy PostgreSQL DLLs (Windows only) ===
@@ -81,6 +82,11 @@ if (WIN32)
         add_custom_command(TARGET server POST_BUILD
                 COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 "${DLL}" $<TARGET_FILE_DIR:server>
+        )
+        # Copy DLLs for GTK app
+        add_custom_command(TARGET gtk_app POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${DLL}" $<TARGET_FILE_DIR:gtk_app>
         )
     endforeach()
 endif()

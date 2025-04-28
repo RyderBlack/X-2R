@@ -2,9 +2,12 @@
 #include <string.h>
 #include <pthread.h>
 #include <time.h>
+#include <libpq-fe.h>
+#include <stdbool.h>
 #include "platform.h"
 #include "env_loader.h"
 #include "protocol.h"
+#include "db_connection.h"
 
 #define BUFFER_SIZE 1024
 
@@ -28,9 +31,10 @@ typedef struct
     GtkWidget *contacts_list;
     SOCKET server_socket;
     pthread_t receive_thread;
-    bool is_running;
+    gboolean is_running;
     uint32_t current_channel_id;
     char username[32];
+    PGconn *db_conn;
 } AppWidgets;
 
 // Function to show error dialog
@@ -194,7 +198,7 @@ static void* receive_messages(void* arg) {
 // Function to handle window close
 static gboolean on_window_delete(GtkWidget *widget, GdkEvent *event, gpointer data) {
     AppWidgets *widgets = (AppWidgets *)data;
-    widgets->is_running = false;
+    widgets->is_running = FALSE;
     
     // Close the socket to wake up the receive thread
     CLOSE_SOCKET(widgets->server_socket);
@@ -212,18 +216,30 @@ static void on_login_button_clicked(GtkButton *button, gpointer user_data) {
     const gchar *password = gtk_entry_get_text(GTK_ENTRY(widgets->password_entry));
     
     if (strlen(username) > 0 && strlen(password) > 0) {
-        // Send authentication message
-        Message* auth_msg = create_auth_message(username, password);
-        if (send_message(widgets->server_socket, auth_msg) < 0) {
-            show_error_dialog(widgets->window, "Failed to send authentication");
+        // Check credentials in database
+        const char *query = "SELECT user_id FROM users WHERE email = $1 AND password = $2";
+        const char *params[2] = {username, password};
+        PGresult *res = PQexecParams(widgets->db_conn, query, 2, NULL, params, NULL, NULL, 0);
+        
+        if (PQresultStatus(res) == PGRES_TUPLES_OK && PQntuples(res) > 0) {
+            printf("✅ Login successful for user: %s\n", username);
+            
+            // Update user status to online
+            const char *update_query = "UPDATE users SET status = 'online' WHERE email = $1";
+            const char *update_params[1] = {username};
+            PGresult *update_res = PQexecParams(widgets->db_conn, update_query, 1, NULL, update_params, NULL, NULL, 0);
+            PQclear(update_res);
+            
+            // Store username
+            strncpy(widgets->username, username, sizeof(widgets->username) - 1);
+            
+            // Switch to chat view
+            gtk_stack_set_visible_child_name(GTK_STACK(widgets->stack), "chat");
+        } else {
+            printf("❌ Login failed for user: %s\n", username);
+            show_error_dialog(widgets->window, "Invalid username or password");
         }
-        free(auth_msg);
-        
-        // Store username
-        strncpy(widgets->username, username, sizeof(widgets->username) - 1);
-        
-        // Switch to chat view
-        gtk_stack_set_visible_child_name(GTK_STACK(widgets->stack), "chat");
+        PQclear(res);
     }
 }
 
@@ -268,6 +284,21 @@ static void on_send_message(GtkButton *button, gpointer user_data) {
     const gchar *message = gtk_entry_get_text(GTK_ENTRY(widgets->chat_input));
     
     if (strlen(message) > 0 && widgets->current_channel_id != 0) {
+        // Store message in database
+        const char *query = "INSERT INTO messages (channel_id, sender_id, content) VALUES ($1, (SELECT user_id FROM users WHERE email = $2), $3)";
+        const char *params[3] = {widgets->username, message};
+        char channel_id_str[32];
+        snprintf(channel_id_str, sizeof(channel_id_str), "%u", widgets->current_channel_id);
+        params[0] = channel_id_str;
+        
+        PGresult *res = PQexecParams(widgets->db_conn, query, 3, NULL, params, NULL, NULL, 0);
+        if (PQresultStatus(res) == PGRES_COMMAND_OK) {
+            printf("📤 Message sent to channel %u: %s\n", widgets->current_channel_id, message);
+        } else {
+            printf("❌ Failed to store message in database\n");
+        }
+        PQclear(res);
+        
         // Send message to server
         Message* chat_msg = create_chat_message(widgets->current_channel_id, message);
         if (send_message(widgets->server_socket, chat_msg) < 0) {
@@ -286,7 +317,7 @@ static void on_register_nav_button_clicked(GtkButton *button, gpointer user_data
     gtk_stack_set_visible_child_name(GTK_STACK(widgets->stack), "register");
 }
 
-// Fonction de callback pour le bouton d'inscription sur la page d'inscription
+// Function to handle registration
 static void on_register_button_clicked(GtkButton *button, gpointer user_data)
 {
     AppWidgets *widgets = (AppWidgets *)user_data;
@@ -295,11 +326,34 @@ static void on_register_button_clicked(GtkButton *button, gpointer user_data)
     const gchar *email = gtk_entry_get_text(GTK_ENTRY(widgets->register_email_entry));
     const gchar *password = gtk_entry_get_text(GTK_ENTRY(widgets->register_password_entry));
 
-    // Ici, vous pouvez ajouter votre logique d'inscription
-    if (strlen(firstname) > 0 && strlen(lastname) > 0 && strlen(email) > 0 && strlen(password) > 0)
-    {
-        // Retour à la page de connexion après inscription
-        gtk_stack_set_visible_child_name(GTK_STACK(widgets->stack), "login");
+    if (strlen(firstname) > 0 && strlen(lastname) > 0 && strlen(email) > 0 && strlen(password) > 0) {
+        // Check if email already exists
+        const char *check_query = "SELECT user_id FROM users WHERE email = $1";
+        const char *check_params[1] = {email};
+        PGresult *check_res = PQexecParams(widgets->db_conn, check_query, 1, NULL, check_params, NULL, NULL, 0);
+        
+        if (PQresultStatus(check_res) == PGRES_TUPLES_OK && PQntuples(check_res) > 0) {
+            printf("❌ Registration failed - Email already exists: %s\n", email);
+            show_error_dialog(widgets->window, "Email already exists");
+            PQclear(check_res);
+            return;
+        }
+        PQclear(check_res);
+        
+        // Insert new user
+        const char *insert_query = "INSERT INTO users (first_name, last_name, email, password, status) VALUES ($1, $2, $3, $4, 'offline')";
+        const char *insert_params[4] = {firstname, lastname, email, password};
+        PGresult *insert_res = PQexecParams(widgets->db_conn, insert_query, 4, NULL, insert_params, NULL, NULL, 0);
+        
+        if (PQresultStatus(insert_res) == PGRES_COMMAND_OK) {
+            printf("✅ Registration successful for user: %s\n", email);
+            // Return to login page
+            gtk_stack_set_visible_child_name(GTK_STACK(widgets->stack), "login");
+        } else {
+            printf("❌ Registration failed for user: %s\n", email);
+            show_error_dialog(widgets->window, "Registration failed");
+        }
+        PQclear(insert_res);
     }
 }
 
@@ -542,11 +596,20 @@ int main(int argc, char *argv[])
         return 1;
     }
 
+    // Connect to database
+    PGconn *db_conn = connect_to_db();
+    if (!db_conn) {
+        fprintf(stderr, "Failed to connect to database\n");
+        CLOSE_SOCKET(sock);
+        return 1;
+    }
+
     // Création de la fenêtre principale
     AppWidgets widgets;
     widgets.server_socket = sock;
-    widgets.is_running = true;
+    widgets.is_running = TRUE;
     widgets.current_channel_id = 0;
+    widgets.db_conn = db_conn;
     
     // Create the window first
     widgets.window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
@@ -612,6 +675,7 @@ int main(int argc, char *argv[])
     gtk_main();
 
     // Cleanup
+    PQfinish(db_conn);
     CLEANUP_NETWORKING();
 
     return 0;

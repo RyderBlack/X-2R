@@ -27,6 +27,9 @@ copy "%GTK_PATH%\libpixman-1-0.dll" .
 copy "%GTK_PATH%\libpng16-16.dll" .
 copy "%GTK_PATH%\libz.dll" .
 
+:: Copy .env file to build directory
+copy "..\.env" .
+
 :: Lancer l'application
 .\gtk_app.exe
 
