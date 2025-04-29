@@ -5,6 +5,18 @@
 #include <stdbool.h>
 #include "platform.h"
 
+// Define maximum payload size
+#define MAX_PAYLOAD_SIZE 4096
+
+// Make sure INVALID_SOCKET is defined
+#ifndef INVALID_SOCKET
+#ifdef _WIN32
+#define INVALID_SOCKET INVALID_SOCKET
+#else
+#define INVALID_SOCKET (-1)
+#endif
+#endif
+
 // Message types
 typedef enum {
     MSG_AUTH,

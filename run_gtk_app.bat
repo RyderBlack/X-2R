@@ -4,6 +4,13 @@ setlocal
 :: Chemin vers les DLLs GTK3 (à adapter selon votre installation MSYS2)
 set GTK_PATH=C:\msys64\mingw64\bin
 
+:: Set environment variables to improve UTF-8 handling
+set G_MESSAGES_DEBUG=all
+set LANG=en_US.UTF-8
+set LC_ALL=en_US.UTF-8
+set PANGO_WIN32_NO_UNISCRIBE=1
+set GTK_IM_MODULE=ime
+
 :: Copier les DLLs nécessaires
 copy "%GTK_PATH%\libgtk-3-0.dll" .
 copy "%GTK_PATH%\libgdk-3-0.dll" .
@@ -28,9 +35,21 @@ copy "%GTK_PATH%\libpng16-16.dll" .
 copy "%GTK_PATH%\libz.dll" .
 
 :: Copy .env file to build directory
-copy "..\.env" .
+if exist "..\.env" (
+    copy "..\.env" .
+    echo Copied .env file from parent directory
+) else (
+    echo WARNING: .env file not found in parent directory
+)
+
+:: Check if the executable exists
+if not exist "gtk_app.exe" (
+    echo ERROR: gtk_app.exe not found. Compile the application first.
+    exit /b 1
+)
 
 :: Lancer l'application
+echo Starting GTK application...
 .\gtk_app.exe
 
 endlocal 

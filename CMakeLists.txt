@@ -28,10 +28,10 @@ add_executable(server
 )
 
 # === Client Target ===
-add_executable(client
-        main_client.c
-        ${COMMON_SOURCES}
-)
+#add_executable(client
+#        main_client.c
+#        ${COMMON_SOURCES}
+#)
 
 # === GTK App Target ===
 add_executable(gtk_app
@@ -45,7 +45,7 @@ if (WIN32)
     target_link_libraries(server libpq ws2_32)
 
     # Client only needs Winsock
-    target_link_libraries(client ws2_32)
+#    target_link_libraries(client ws2_32)
 
     # GTK App needs GTK, Winsock, pthread, and PostgreSQL
     find_package(PkgConfig REQUIRED)
