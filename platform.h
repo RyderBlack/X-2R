@@ -4,25 +4,31 @@
 #ifdef _WIN32
     #include <winsock2.h>
     #include <ws2tcpip.h>
-    #pragma comment(lib, "ws2_32.lib") // Optional: Auto-link Winsock on MSVC
-    typedef int socklen_t;
-#define CLOSE_SOCKET(s) closesocket(s)
-#define INIT_NETWORKING() \
-WSADATA wsaData; \
-if (WSAStartup(MAKEWORD(2,2), &wsaData) != 0) { \
-fprintf(stderr, "WSAStartup failed.\n"); \
-exit(EXIT_FAILURE); \
-}
-#define CLEANUP_NETWORKING() WSACleanup()
+
+    // Initialize Winsock
+    #define INIT_NETWORKING() \
+    do { \
+    if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) { \
+    fprintf(stderr, "WSAStartup failed\n"); \
+    exit(EXIT_FAILURE); \
+    } \
+    } while (0)
+
+    // Cleanup Winsock
+    #define CLEANUP_NETWORKING() \
+    do { WSACleanup(); } while (0)
+
+    #define CLOSE_SOCKET(s) closesocket(s)
+
 #else
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <unistd.h>
-typedef int SOCKET;
-#define CLOSE_SOCKET(s) close(s)
-#define INIT_NETWORKING()  // No-op on Unix
-#define CLEANUP_NETWORKING() // No-op on Unix
+    #include <sys/socket.h>
+    #include <arpa/inet.h>
+    #include <netinet/in.h>
+    #include <unistd.h>
+
+    #define INIT_NETWORKING()     ((void)0)
+    #define CLEANUP_NETWORKING()  ((void)0)
+    #define CLOSE_SOCKET(s)       close(s)
 #endif
 
 #endif // PLATFORM_H

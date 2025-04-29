@@ -61,11 +61,13 @@ void* handle_client(void* arg) {
 }
 
 int main(int argc, char *argv[]) {
+    // Load environment variables
     if (!load_env(".env")) {
         fprintf(stderr, "Failed to load .env file\n");
         return EXIT_FAILURE;
     }
 
+    // Connect to PostgreSQL
     PGconn *conn = connect_to_db();
     if (conn == NULL || PQstatus(conn) != CONNECTION_OK) {
         fprintf(stderr, "Database connection failed: %s\n", PQerrorMessage(conn));
@@ -83,16 +85,17 @@ int main(int argc, char *argv[]) {
 
     int server_fd;
     struct sockaddr_in address;
-    int opt = 1;
     socklen_t addrlen = sizeof(address);
+    char buffer[BUFFER_SIZE] = {0};
+    int opt = 1;
 
     if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
-        perror("socket failed");
+        perror("Socket creation failed");
         return EXIT_FAILURE;
     }
 
     if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, (char *)&opt, sizeof(opt)) < 0) {
-        perror("setsockopt");
+        perror("setsockopt failed");
         CLOSESOCKET(server_fd);
         return EXIT_FAILURE;
     }
@@ -102,7 +105,7 @@ int main(int argc, char *argv[]) {
     address.sin_port = htons(PORT);
 
     if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
-        perror("bind failed");
+        perror("Bind failed");
         CLOSESOCKET(server_fd);
         return EXIT_FAILURE;
     }
@@ -145,10 +148,7 @@ int main(int argc, char *argv[]) {
 
     PQfinish(conn);
     CLOSESOCKET(server_fd);
-
-#ifdef _WIN32
-    WSACleanup();
-#endif
+    CLEANUP_NETWORKING();
 
     return EXIT_SUCCESS;
 }
