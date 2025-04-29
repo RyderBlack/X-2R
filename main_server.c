@@ -1,26 +1,64 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <pthread.h> // <-- NEW!
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#pragma comment(lib, "ws2_32.lib")
+typedef int socklen_t;
+#define CLOSESOCKET closesocket
+#else
+#include <unistd.h>
+#include <arpa/inet.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#define CLOSESOCKET close
+#endif
 
-#include "platform.h"      // Platform-specific includes
+#include "platform.h"
 #include "env_loader.h"
 #include "db_connection.h"
-
-// Platform-specific networking
-#ifdef _WIN32
-    #include <winsock2.h>
-    #include <ws2tcpip.h>
-    #pragma comment(lib, "ws2_32.lib")
-    WSADATA wsaData;  // Local declaration for Winsock
-#else
-    #include <arpa/inet.h>
-    #include <sys/socket.h>
-    #include <netinet/in.h>
-    #include <unistd.h>
-#endif
+#include "protocol.h" // Message, ChatMessage, send_message, receive_message
 
 #define PORT 8080
 #define BUFFER_SIZE 1024
+
+// Thread function for handling a client
+void* handle_client(void* arg) {
+    int client_socket = *(int*)arg;
+    free(arg); // We malloced it in main(), free it here
+
+    printf("📥 New thread started for client socket %d\n", client_socket);
+
+    while (1) {
+        Message* msg = receive_message(client_socket);
+        if (!msg) {
+            printf("❌ Client disconnected or error on socket %d\n", client_socket);
+            break;
+        }
+
+        printf("📝 Received message type: %d, length: %u\n", msg->type, msg->length);
+
+        if (msg->type == MSG_CHAT) {
+            ChatMessage* chat = (ChatMessage*)msg->payload;
+            printf("💬 [Channel %u] %s: %s\n", chat->channel_id, chat->sender_username, chat->content);
+
+            // Echo the chat message back to the same client
+            send_message(client_socket, msg);
+            printf("📤 Echoed chat message back to client.\n");
+        } else {
+            printf("❓ Received non-chat message, ignoring.\n");
+        }
+
+        free(msg);
+    }
+
+    CLOSESOCKET(client_socket);
+    printf("🔒 Connection closed for socket %d\n", client_socket);
+
+    pthread_exit(NULL);
+}
 
 int main(int argc, char *argv[]) {
     // Load environment variables
@@ -37,10 +75,15 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
-    INIT_NETWORKING();
+#ifdef _WIN32
+    WSADATA wsaData;
+    if (WSAStartup(MAKEWORD(2,2), &wsaData) != 0) {
+        fprintf(stderr, "WSAStartup failed.\n");
+        return EXIT_FAILURE;
+    }
+#endif
 
-    // Socket setup
-    int server_fd, new_socket;
+    int server_fd;
     struct sockaddr_in address;
     socklen_t addrlen = sizeof(address);
     char buffer[BUFFER_SIZE] = {0};
@@ -53,7 +96,7 @@ int main(int argc, char *argv[]) {
 
     if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, (char *)&opt, sizeof(opt)) < 0) {
         perror("setsockopt failed");
-        CLOSE_SOCKET(server_fd);
+        CLOSESOCKET(server_fd);
         return EXIT_FAILURE;
     }
 
@@ -63,54 +106,48 @@ int main(int argc, char *argv[]) {
 
     if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
         perror("Bind failed");
-        CLOSE_SOCKET(server_fd);
+        CLOSESOCKET(server_fd);
         return EXIT_FAILURE;
     }
 
-    if (listen(server_fd, 3) < 0) {
-        perror("Listen failed");
-        CLOSE_SOCKET(server_fd);
+    if (listen(server_fd, 5) < 0) {
+        perror("listen");
+        CLOSESOCKET(server_fd);
         return EXIT_FAILURE;
     }
 
     printf("✅ Server is listening on port %d...\n", PORT);
 
     while (1) {
-        new_socket = accept(server_fd, (struct sockaddr *)&address, &addrlen);
-        if (new_socket < 0) {
-            perror("Accept failed");
+        int* new_socket = malloc(sizeof(int)); // Allocate socket for thread
+        if (!new_socket) {
+            perror("malloc failed");
             continue;
         }
 
-        char client_ip[INET_ADDRSTRLEN];
-#ifdef _WIN32
-        struct sockaddr_in sa;
-        int sa_len = sizeof(sa);
-        getpeername(new_socket, (struct sockaddr*)&sa, &sa_len);
-        inet_ntop(AF_INET, &sa.sin_addr, client_ip, sizeof(client_ip));
-#else
-        inet_ntop(AF_INET, &(address.sin_addr), client_ip, INET_ADDRSTRLEN);
-#endif
-
-        printf("📥 Connection accepted from %s:%d\n", client_ip, ntohs(address.sin_port));
-
-        int bytes_read = recv(new_socket, buffer, BUFFER_SIZE - 1, 0);
-        if (bytes_read > 0) {
-            buffer[bytes_read] = '\0';
-            printf("📝 Received: %s\n", buffer);
-
-            // Echo back the received message
-            send(new_socket, buffer, strlen(buffer), 0);
-            printf("📤 Echoed back to client.\n");
-
-            // Future enhancement: insert into DB
+        *new_socket = accept(server_fd, (struct sockaddr *)&address, &addrlen);
+        if (*new_socket < 0) {
+            perror("accept");
+            free(new_socket);
+            continue;
         }
 
-        CLOSE_SOCKET(new_socket);
+        printf("🔗 Accepted connection, socket %d\n", *new_socket);
+
+        // Create thread to handle client
+        pthread_t thread_id;
+        if (pthread_create(&thread_id, NULL, handle_client, new_socket) != 0) {
+            perror("pthread_create failed");
+            CLOSESOCKET(*new_socket);
+            free(new_socket);
+            continue;
+        }
+
+        pthread_detach(thread_id); // Auto cleanup thread resources when done
     }
 
     PQfinish(conn);
-    CLOSE_SOCKET(server_fd);
+    CLOSESOCKET(server_fd);
     CLEANUP_NETWORKING();
 
     return EXIT_SUCCESS;

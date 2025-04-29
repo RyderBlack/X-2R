@@ -23,12 +23,16 @@ endif()
 set(COMMON_SOURCES
         env_loader.c
         platform.h
+        protocol.c
+        protocol.h
+        db_connection.c
+        db_connection.h
+        encryption.c
 )
 
 # --- Server Target ---
 add_executable(server
         main_server.c
-        db_connection.c
         ${COMMON_SOURCES}
         chat_window.c
         chat_window.h
@@ -40,13 +44,31 @@ add_executable(client
         ${COMMON_SOURCES}
 )
 
+# --- GTK App Target ---
+add_executable(gtk_app
+        gtk_app.c
+        ${COMMON_SOURCES}
+)
+
 # --- Link Libraries ---
 if (WIN32)
     target_link_libraries(server libpq ws2_32)
     target_link_libraries(client ws2_32)
+
+    # GTK App needs GTK, Winsock, pthread, and PostgreSQL
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(GTK3 REQUIRED gtk+-3.0)
+    include_directories(${GTK3_INCLUDE_DIRS})
+    target_link_libraries(gtk_app ${GTK3_LIBRARIES} ws2_32 pthread libpq)
 else()
     target_link_libraries(server pq)
     target_link_libraries(client)
+
+    # GTK App needs GTK, pthread, and PostgreSQL
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(GTK3 REQUIRED gtk+-3.0)
+    include_directories(${GTK3_INCLUDE_DIRS})
+    target_link_libraries(gtk_app ${GTK3_LIBRARIES} pthread pq)
 endif()
 
 # Link GTK3 libraries after the targets are created
@@ -69,6 +91,11 @@ if (WIN32)
         add_custom_command(TARGET server POST_BUILD
                 COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 "${DLL}" $<TARGET_FILE_DIR:server>
+        )
+        # Copy DLLs for GTK app
+        add_custom_command(TARGET gtk_app POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${DLL}" $<TARGET_FILE_DIR:gtk_app>
         )
     endforeach()
 endif()
