@@ -1,0 +1,70 @@
+window {
+    background-color: black;
+}
+
+#login-title, #register-title {
+    font-size: 24px;
+    color: red;
+    margin-bottom: 20px;
+}
+
+#channels-title, #contacts-title {
+    font-size: 18px;
+    color: red;
+    font-weight: bold;
+}
+
+#channel-name {
+    font-size: 20px;
+    color: red;
+    font-weight: bold;
+}
+
+entry {
+    padding: 8px;
+    border-radius: 4px;
+    border: 1px solid red;
+    color: white;
+    background-color: black;
+    margin: 5px 0;
+}
+
+entry:focus {
+    border-color: #ff3333;
+}
+
+#login-button, #register-button, #register-nav-button, #back-button, #send-button {
+    padding: 10px 20px;
+    background-color: red;
+    color: red;
+    border: none;
+    border-radius: 4px;
+}
+
+#login-button:hover, #register-button:hover, #register-nav-button:hover, #back-button:hover, #send-button:hover {
+    background-color: #cc0000;
+}
+
+#chat-history {
+    background-color: #111111;
+    color: white;
+}
+
+#channels-box, #contacts-box {
+    background-color: #1a1a1a;
+    border-right: 1px solid #333333;
+    border-left: 1px solid #333333;
+}
+
+#channels-list, #contacts-list {
+    background-color: #1a1a1a;
+    color: white;
+}
+
+#channels-list label, #contacts-list label {
+    padding: 8px 0;
+}
+
+#channels-list label:hover, #contacts-list label:hover {
+    background-color: #333333;
+} 

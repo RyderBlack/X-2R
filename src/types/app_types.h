@@ -9,6 +9,8 @@
 #include "../network/platform.h"
 #include "../network/protocol.h"
 
+#define BUFFER_SIZE 1024
+
 // Structure to hold all application widgets
 typedef struct {
     GtkWidget *window;
@@ -40,8 +42,9 @@ typedef struct {
 // Structure for chat update data
 typedef struct {
     AppWidgets *widgets;
-    char sender[256];
-    char content[1024];
+    char sender[128];
+    char content[BUFFER_SIZE];
+    uint32_t channel_id;
 } ChatUpdateData;
 
 // Function declarations

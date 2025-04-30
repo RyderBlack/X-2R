@@ -24,10 +24,18 @@ typedef int socklen_t;
 #define PORT 8080
 #define BUFFER_SIZE 1024
 
+// Structure to pass data to client handler thread
+typedef struct {
+    int socket;
+    PGconn *db_conn;
+} ClientData;
+
 // Thread function for handling a client
 void* handle_client(void* arg) {
-    int client_socket = *(int*)arg;
-    free(arg);
+    ClientData *data = (ClientData *)arg;
+    int client_socket = data->socket;
+    PGconn *conn = data->db_conn;
+    free(data);
 
     printf("📥 New thread started for client socket %d\n", client_socket);
 
@@ -43,6 +51,8 @@ void* handle_client(void* arg) {
         if (msg->type == MSG_CHAT) {
             ChatMessage* chat = (ChatMessage*)msg->payload;
             printf("💬 [Channel %u] %s: %s\n", chat->channel_id, chat->sender_username, chat->content);
+
+            // Echo message back to client
             send_message(client_socket, msg);
             printf("📤 Echoed chat message back to client.\n");
         } else {
@@ -114,27 +124,28 @@ int main(int argc, char *argv[]) {
     printf("✅ Server is listening on port %d...\n", PORT);
 
     while (1) {
-        int* new_socket = malloc(sizeof(int)); // Allocate socket for thread
-        if (!new_socket) {
+        ClientData *data = malloc(sizeof(ClientData));
+        if (!data) {
             perror("malloc failed");
             continue;
         }
 
-        *new_socket = accept(server_fd, (struct sockaddr *)&address, &addrlen);
-        if (*new_socket < 0) {
+        data->socket = accept(server_fd, (struct sockaddr *)&address, &addrlen);
+        if (data->socket < 0) {
             perror("accept");
-            free(new_socket);
+            free(data);
             continue;
         }
+        data->db_conn = conn;
 
-        printf("🔗 Accepted connection, socket %d\n", *new_socket);
+        printf("🔗 Accepted connection, socket %d\n", data->socket);
 
         // Create thread to handle client
         pthread_t thread_id;
-        if (pthread_create(&thread_id, NULL, handle_client, new_socket) != 0) {
+        if (pthread_create(&thread_id, NULL, handle_client, data) != 0) {
             perror("pthread_create failed");
-            CLOSESOCKET(*new_socket);
-            free(new_socket);
+            CLOSESOCKET(data->socket);
+            free(data);
             continue;
         }
 
