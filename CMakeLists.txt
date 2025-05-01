@@ -99,7 +99,7 @@ else()
     target_link_libraries(gtk_app PRIVATE ${GTK3_LIBRARIES} pthread pq)
 endif()
 
-# Copy PostgreSQL DLLs
+# Copy PostgreSQL DLLs to bin folder
 if(WIN32)
     set(DLL_FILES
             "${POSTGRESQL_ROOT}/bin/libpq.dll"
@@ -110,14 +110,15 @@ if(WIN32)
             "${POSTGRESQL_ROOT}/bin/zlib1.dll"
     )
     foreach(DLL ${DLL_FILES})
+        # Copy the DLL to the build folder directly (not bin)
         add_custom_command(TARGET server POST_BUILD
-                COMMAND ${CMAKE_COMMAND} -E copy_if_different "${DLL}" $<TARGET_FILE_DIR:server>)
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different "${DLL}" ${CMAKE_BINARY_DIR})
         add_custom_command(TARGET gtk_app POST_BUILD
-                COMMAND ${CMAKE_COMMAND} -E copy_if_different "${DLL}" $<TARGET_FILE_DIR:gtk_app>)
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different "${DLL}" ${CMAKE_BINARY_DIR})
     endforeach()
 endif()
 
-# GTK DLLs
+# GTK DLL copying (same as above)
 set(GTK_PATH "C:/msys64/mingw64/bin") # <- Added to pass into .bat
 set(DLL_FILES_GTK
         "${GTK_PATH}/libgtk-3-0.dll"
@@ -135,27 +136,26 @@ set(DLL_FILES_GTK
 )
 
 foreach(DLL ${DLL_FILES_GTK})
+    # Copy the GTK DLLs directly to the build folder (not bin)
     add_custom_command(TARGET gtk_app POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${DLL}" $<TARGET_FILE_DIR:gtk_app>)
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${DLL}" ${CMAKE_BINARY_DIR})
 endforeach()
 
+# Ensure target directories exist before copying files
 add_custom_command(TARGET gtk_app POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_directory "C:/msys64/mingw64/etc/gtk-3.0" $<TARGET_FILE_DIR:gtk_app>/etc/gtk-3.0)
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/bin/etc"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/bin/etc/gtk-3.0"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory "C:/msys64/mingw64/etc/gtk-3.0" "${CMAKE_BINARY_DIR}/bin/etc/gtk-3.0"
+)
 
 add_custom_command(TARGET gtk_app POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_directory "C:/msys64/mingw64/share/icons" $<TARGET_FILE_DIR:gtk_app>/etc/gtk-3.0)
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/src/styles/app.css" "${CMAKE_BINARY_DIR}/bin/app.css")
 
 add_custom_command(TARGET gtk_app POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_directory "C:/msys64/mingw64/share/themes" $<TARGET_FILE_DIR:gtk_app>/etc/gtk-3.0)
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/.env" "${CMAKE_BINARY_DIR}/bin/.env")
 
 add_custom_command(TARGET gtk_app POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/src/styles/app.css" "$<TARGET_FILE_DIR:gtk_app>/app.css")
-
-add_custom_command(TARGET gtk_app POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/.env" "$<TARGET_FILE_DIR:gtk_app>/.env")
-
-add_custom_command(TARGET gtk_app POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/icon.png" "$<TARGET_FILE_DIR:gtk_app>/icon.png")
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/icon.png" "${CMAKE_BINARY_DIR}/bin/icon.png")
 
 # Install CSS
 install(FILES src/styles/app.css DESTINATION share/${PROJECT_NAME}/styles PERMISSIONS OWNER_READ GROUP_READ WORLD_READ)
@@ -204,7 +204,6 @@ install(FILES
         DESTINATION bin
 )
 
-
 # Define variables for .bat substitution
 set(GTK_PATH ${GTK_PATH})
 set(CMAKE_SOURCE_DIR ${CMAKE_SOURCE_DIR}) # already defined, but explicit
@@ -215,7 +214,6 @@ configure_file(
         "${CMAKE_BINARY_DIR}/run_gtk_app.bat"
         @ONLY
 )
-
 
 include(InstallRequiredSystemLibraries)
 
@@ -231,8 +229,8 @@ set(CPACK_GENERATOR "NSIS")
 set(CPACK_NSIS_DISPLAY_NAME "X-RR")
 set(CPACK_NSIS_PACKAGE_NAME "X-RR Installer")
 set(CPACK_NSIS_EXECUTABLES_DIRECTORY ".")
-set(CPACK_NSIS_MUI_ICON "${CMAKE_SOURCE_DIR}/src/icon.ico") # optional icon
-set(CPACK_NSIS_INSTALLED_ICON_NAME "bin\\gtk_app.exe")      # sets start menu icon
+set(CPACK_NSIS_MUI_ICON "${CMAKE_SOURCE_DIR}/x2r_logo.ico")
+set(CPACK_NSIS_INSTALLED_ICON_NAME "bin/gtk_app.exe")      # sets start menu icon
 
 #set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_SOURCE_DIR}/LICENSE.txt")
 #set(CPACK_RESOURCE_FILE_README "${CMAKE_SOURCE_DIR}/README.txt")
