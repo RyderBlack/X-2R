@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <libpq-fe.h>
-#include "env_loader.h"
+#include "../config/env_loader.h"
 #include "db_connection.h"
 
 PGconn* connect_to_db() {

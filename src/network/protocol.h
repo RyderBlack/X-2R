@@ -25,6 +25,7 @@ typedef enum {
     MSG_CHANNEL_LIST,
     MSG_JOIN_CHANNEL,
     MSG_LEAVE_CHANNEL,
+    MSG_REGISTER,
     MSG_ERROR
 } MessageType;
 
@@ -71,8 +72,16 @@ typedef struct {
     char payload[];  // Flexible array member
 } Message;
 
+typedef struct {
+    char firstname[64];
+    char lastname[64];
+    char email[128];
+    char password[64];
+} RegistrationMessage;
+
 // Function prototypes
 Message* create_message(MessageType type, const void* payload, uint32_t payload_size);
+Message* create_registration_message(const char *firstname, const char *lastname, const char *email, const char *password);
 Message* create_auth_message(const char* username, const char* password);
 Message* create_chat_message(uint32_t channel_id, const char* content);
 Message* create_join_channel_message(uint32_t channel_id);

@@ -167,4 +167,19 @@ Message* receive_message(SOCKET sock) {
     }
     
     return msg;
-} 
+}
+
+Message* create_registration_message(const char *firstname, const char *lastname, const char *email, const char *password) {
+    if (!firstname || !lastname || !email || !password) {
+        fprintf(stderr, "Invalid registration data\n");
+        return NULL;
+    }
+
+    RegistrationMessage reg = {0};
+    strncpy(reg.firstname, firstname, sizeof(reg.firstname) - 1);
+    strncpy(reg.lastname, lastname, sizeof(reg.lastname) - 1);
+    strncpy(reg.email, email, sizeof(reg.email) - 1);
+    strncpy(reg.password, password, sizeof(reg.password) - 1);
+
+    return create_message(MSG_REGISTER, &reg, sizeof(RegistrationMessage));
+}

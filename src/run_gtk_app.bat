@@ -1,7 +1,7 @@
 @echo off
 setlocal
 
-:: Chemin vers les DLLs GTK3 (à adapter selon votre installation MSYS2)
+:: Path to DLLs GTK3 (depends on MSYS2 installation)
 set GTK_PATH=C:\msys64\mingw64\bin
 
 :: Set environment variables to improve UTF-8 handling
@@ -11,7 +11,7 @@ set LC_ALL=en_US.UTF-8
 set PANGO_WIN32_NO_UNISCRIBE=1
 set GTK_IM_MODULE=ime
 
-:: Copier les DLLs nécessaires
+:: Copy DLLs
 copy "%GTK_PATH%\libgtk-3-0.dll" .
 copy "%GTK_PATH%\libgdk-3-0.dll" .
 copy "%GTK_PATH%\libgobject-2.0-0.dll" .
@@ -48,7 +48,7 @@ if not exist "gtk_app.exe" (
     exit /b 1
 )
 
-:: Lancer l'application
+:: Launch the application
 echo Starting GTK application...
 .\gtk_app.exe
 

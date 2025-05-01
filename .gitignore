@@ -54,6 +54,8 @@ cmake-build-debug/
 cmake-build-debug/.env
 .idea
 build/
+.vscode/
+.vscode
 
 .env
 *.env
