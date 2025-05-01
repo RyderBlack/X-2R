@@ -3,6 +3,8 @@ setlocal
 
 :: Path to DLLs GTK3 (depends on MSYS2 installation)
 set GTK_PATH=C:\msys64\mingw64\bin
+set GTK_CSS_PATH=%~dp0app.css
+set GTK_THEME=Adwaita:dark
 
 :: Set environment variables to improve UTF-8 handling
 set G_MESSAGES_DEBUG=all
@@ -52,4 +54,6 @@ if not exist "gtk_app.exe" (
 echo Starting GTK application...
 .\gtk_app.exe
 
-endlocal 
+endlocal
+
+pause

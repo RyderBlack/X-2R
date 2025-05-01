@@ -1,11 +1,74 @@
 @echo off
 setlocal
 
-:: Set the application directory
-set APP_DIR=%~dp0..
+:: Path to DLLs GTK3 (provided by CMake)
+set GTK_PATH=@GTK_PATH@
+set GTK_CSS_PATH=%~dp0app.css
+set GTK_THEME=Adwaita:dark
 
-:: Set the CSS path
-set GTK_CSS_PATH=%APP_DIR%\share\@PROJECT_NAME@\src\styles\app.css
+:: Set environment variables to improve UTF-8 handling
+set G_MESSAGES_DEBUG=all
+set LANG=en_US.UTF-8
+set LC_ALL=en_US.UTF-8
+set PANGO_WIN32_NO_UNISCRIBE=1
+set GTK_IM_MODULE=ime
 
-:: Run the application
-"%APP_DIR%\bin\@PROJECT_NAME@" %* 
+:: Copy DLLs
+copy "%GTK_PATH%\libgtk-3-0.dll" .
+copy "%GTK_PATH%\libgdk-3-0.dll" .
+copy "%GTK_PATH%\libgobject-2.0-0.dll" .
+copy "%GTK_PATH%\libglib-2.0-0.dll" .
+copy "%GTK_PATH%\libcairo-2.dll" .
+copy "%GTK_PATH%\libpango-1.0-0.dll" .
+copy "%GTK_PATH%\libpangocairo-1.0-0.dll" .
+copy "%GTK_PATH%\libgdk_pixbuf-2.0-0.dll" .
+copy "%GTK_PATH%\libatk-1.0-0.dll" .
+copy "%GTK_PATH%\libepoxy-0.dll" .
+copy "%GTK_PATH%\libffi-8.dll" .
+copy "%GTK_PATH%\libgio-2.0-0.dll" .
+copy "%GTK_PATH%\libgmodule-2.0-0.dll" .
+copy "%GTK_PATH%\libharfbuzz-0.dll" .
+copy "%GTK_PATH%\libintl-8.dll" .
+copy "%GTK_PATH%\libpangoft2-1.0-0.dll" .
+copy "%GTK_PATH%\libpangowin32-1.0-0.dll" .
+copy "%GTK_PATH%\libpcre-1.dll" .
+copy "%GTK_PATH%\libpixman-1-0.dll" .
+copy "%GTK_PATH%\libpng16-16.dll" .
+copy "%GTK_PATH%\libz.dll" .
+
+:: Copy .env from source directory
+if exist "@CMAKE_SOURCE_DIR@\.env" (
+    copy "@CMAKE_SOURCE_DIR@\.env" "%~dp0"
+    echo Copied .env from project root
+) else (
+    echo WARNING: .env not found in project root
+)
+
+:: Copy app.css from src/styles
+if exist "@CMAKE_SOURCE_DIR@/src/styles/app.css" (
+    copy "@CMAKE_SOURCE_DIR@/src/styles/app.css" "%~dp0"
+    echo Copied app.css from src/styles
+) else (
+    echo WARNING: app.css not found in src/styles
+)
+
+:: Copy icon.png from project root
+if exist "@CMAKE_SOURCE_DIR@/icon.png" (
+    copy "@CMAKE_SOURCE_DIR@/icon.png" "%~dp0"
+    echo Copied icon.png from project root
+) else (
+    echo WARNING: icon.png not found in project root
+)
+
+:: Check if the executable exists
+if not exist "gtk_app.exe" (
+    echo ERROR: gtk_app.exe not found. Compile the application first.
+    pause
+    exit /b 1
+)
+
+:: Launch the application
+echo Starting GTK application...
+.\gtk_app.exe
+
+endlocal

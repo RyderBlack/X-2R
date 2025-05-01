@@ -190,13 +190,11 @@ ChatPage* chat_page_new(AppWidgets *app_widgets) {
     gtk_widget_set_margin_start(page->channel_name, 10);
     gtk_box_pack_start(GTK_BOX(chat_center_box), page->channel_name, FALSE, FALSE, 10);
     
-    // Chat history
-    page->chat_history = gtk_text_view_new();
-    gtk_text_view_set_editable(GTK_TEXT_VIEW(page->chat_history), FALSE);
-    gtk_text_view_set_cursor_visible(GTK_TEXT_VIEW(page->chat_history), FALSE);
-    gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(page->chat_history), GTK_WRAP_WORD_CHAR);
-    gtk_widget_set_name(page->chat_history, "chat-history");
-    
+    // Chat history - Use GtkListBox
+    page->chat_history = gtk_list_box_new();
+    gtk_list_box_set_selection_mode(GTK_LIST_BOX(page->chat_history), GTK_SELECTION_NONE); // Disable row selection
+    gtk_widget_set_name(page->chat_history, "chat-history-list"); // New ID for CSS
+
     GtkWidget *history_scroll = gtk_scrolled_window_new(NULL, NULL);
     gtk_container_add(GTK_CONTAINER(history_scroll), page->chat_history);
     gtk_widget_set_vexpand(history_scroll, TRUE);

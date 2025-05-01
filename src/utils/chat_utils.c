@@ -70,110 +70,73 @@ void get_display_name(AppWidgets *widgets, const char *sender_email, char *displ
     PQclear(res);
 }
 
+// Helper function to add a message row to the list box and scroll
+static void add_message_to_list_box(GtkListBox *list_box, const char *markup) {
+    GtkWidget *label = gtk_label_new(NULL);
+    gtk_label_set_markup(GTK_LABEL(label), markup);
+    gtk_label_set_xalign(GTK_LABEL(label), 0.0); // Align text to the left
+    gtk_label_set_line_wrap(GTK_LABEL(label), TRUE); // Enable line wrapping
+    gtk_label_set_line_wrap_mode(GTK_LABEL(label), PANGO_WRAP_WORD_CHAR);
+    gtk_widget_set_margin_start(label, 10); // Add some left margin
+    gtk_widget_set_margin_end(label, 10);   // Add some right margin
+    gtk_widget_set_margin_top(label, 5);    // Add some top margin
+    gtk_widget_set_margin_bottom(label, 5); // Add some bottom margin
+
+    GtkWidget *row = gtk_list_box_row_new();
+    gtk_container_add(GTK_CONTAINER(row), label);
+    gtk_widget_set_name(row, "chat-message-row"); // Add CSS class for styling
+    gtk_list_box_insert(list_box, row, -1); // Add to the end
+    gtk_widget_show_all(row);
+
+    // Auto-scroll logic for GtkListBox in GtkScrolledWindow
+    GtkWidget *scrolled_window = gtk_widget_get_ancestor(GTK_WIDGET(list_box), GTK_TYPE_SCROLLED_WINDOW);
+    if (scrolled_window) {
+        GtkAdjustment *vadj = gtk_scrolled_window_get_vadjustment(GTK_SCROLLED_WINDOW(scrolled_window));
+        // Scroll only if the user is near the bottom or hasn't scrolled up manually
+        // A simple approach is to always scroll for now
+        // TODO: Add logic to check if user scrolled up
+        gtk_adjustment_set_value(vadj, gtk_adjustment_get_upper(vadj) - gtk_adjustment_get_page_size(vadj));
+    }
+}
+
 void update_chat_history(AppWidgets *widgets, const char *sender, const char *message, const char *channel_name) {
     if (!widgets || !widgets->chat_history || !message) {
         printf("❌ Invalid parameters for update_chat_history\n");
         return;
     }
-    
+
+    GtkListBox *list_box = GTK_LIST_BOX(widgets->chat_history);
+
     char display_name[128];
     get_display_name(widgets, sender, display_name, sizeof(display_name));
-    
+
     time_t now = time(NULL);
     struct tm *tm_info = localtime(&now);
     char time_str[32];
     strftime(time_str, sizeof(time_str), "%H:%M:%S", tm_info);
-    
-    printf("📝 Updating chat history: [%s] %s: %s\n", time_str, display_name, message);
-    
+
+    printf("📝 Updating chat history (ListBox): [%s] %s: %s\n", time_str, display_name, message);
+
     const char *safe_display_name_raw = sanitize_utf8(display_name);
     const char *safe_message = sanitize_utf8(message);
-    
-    // Escape both display name and message for Pango markup
+
     char *escaped_display_name = g_markup_escape_text(safe_display_name_raw, -1);
     char *escaped_message = g_markup_escape_text(safe_message, -1);
-    if (!escaped_display_name) escaped_display_name = g_strdup(""); // Handle allocation failure
-    if (!escaped_message) escaped_message = g_strdup(""); // Handle allocation failure
+    if (!escaped_display_name) escaped_display_name = g_strdup("");
+    if (!escaped_message) escaped_message = g_strdup("");
 
-    GtkTextBuffer *buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(widgets->chat_history));
-    GtkTextIter end;
-    gtk_text_buffer_get_end_iter(buffer, &end);
-    
-    // Construct Pango markup string
-    char markup[BUFFER_SIZE + 256]; // Extra space for markup tags
+    // Construct Pango markup string (similar format, maybe adjust later)
+    char markup[BUFFER_SIZE + 256];
     snprintf(markup, sizeof(markup),
-             "<b><span foreground='#786ee1' size='large'>%s</span></b> <span foreground='grey' size='small'>%s</span>\n%s\n\n",
+             "<b><span foreground='#786ee1' size='large'>%s</span></b> <span foreground='grey' size='small'>%s</span>\n%s",
              escaped_display_name, time_str, escaped_message);
 
-    // Insert markup into buffer
-    gtk_text_buffer_insert_markup(buffer, &end, markup, -1);
-    
-    g_free(escaped_display_name); // Free the escaped display name
-    g_free(escaped_message); // Free the escaped message
+    add_message_to_list_box(list_box, markup);
 
-    // Auto-scroll
-    GtkTextMark *mark = gtk_text_buffer_create_mark(buffer, "end", &end, FALSE);
-    gtk_text_view_scroll_to_mark(GTK_TEXT_VIEW(widgets->chat_history), mark, 0.0, TRUE, 0.0, 1.0); // Scroll smoothly
-    gtk_text_buffer_delete_mark(buffer, mark);
+    g_free(escaped_display_name);
+    g_free(escaped_message);
 
-    /* --- REMOVE Apply hyperlink tags --- */
-    /*
-    GtkTextTagTable *tag_table = gtk_text_buffer_get_tag_table(buffer);
-    GtkTextTag *link_tag = gtk_text_tag_table_lookup(tag_table, "hyperlink");
-    if (!link_tag) {
-        // Create tag without hardcoded style
-        link_tag = gtk_text_buffer_create_tag(buffer, "hyperlink", NULL);
-        // Store the tag name using g_object_set_data for later retrieval
-        g_object_set_data(G_OBJECT(link_tag), "name", "hyperlink");
-    }
-
-    // Get the range where the message content was inserted
-    GtkTextIter message_start_iter;
-    // We need the start iter of the *actual* message content, not the whole markup
-    // Let's find the beginning of the escaped_message within the inserted markup range
-    // This is tricky because markup insertion might not map directly to simple text ranges.
-    // A simpler approach for now: Search the entire buffer. This is inefficient.
-    // TODO: Find a better way to get the exact range of the inserted message content.
-    gtk_text_buffer_get_start_iter(buffer, &message_start_iter); // Search from start for now
-    GtkTextIter search_end_iter;
-    gtk_text_buffer_get_end_iter(buffer, &search_end_iter);
-
-    const char *msg_ptr = gtk_text_buffer_get_text(buffer, &message_start_iter, &search_end_iter, FALSE);
-    const char *current_pos = msg_ptr;
-    while (current_pos) {
-        const char *url_start_ptr = strstr(current_pos, "http://");
-        const char *https_url_start_ptr = strstr(current_pos, "https://");
-
-        // Find the earliest occurring URL
-        if (https_url_start_ptr && (!url_start_ptr || https_url_start_ptr < url_start_ptr)) {
-            url_start_ptr = https_url_start_ptr;
-        }
-
-        if (!url_start_ptr) break; // No more URLs found
-
-        const char *url_end_ptr = url_start_ptr;
-        while (*url_end_ptr && !isspace((unsigned char)*url_end_ptr) && *url_end_ptr != '\n') {
-            url_end_ptr++;
-        }
-
-        if (url_start_ptr < url_end_ptr) {
-            // Calculate iters in the buffer corresponding to the found URL pointers
-            GtkTextIter url_start_iter, url_end_iter;
-            gint start_offset = url_start_ptr - msg_ptr;
-            gint end_offset = url_end_ptr - msg_ptr;
-
-            gtk_text_buffer_get_iter_at_offset(buffer, &url_start_iter, start_offset);
-            gtk_text_buffer_get_iter_at_offset(buffer, &url_end_iter, end_offset);
-
-            // Apply the tag
-            gtk_text_buffer_apply_tag(buffer, link_tag, &url_start_iter, &url_end_iter);
-        }
-        
-        current_pos = url_end_ptr; // Continue searching after this URL
-    }
-    g_free((gpointer)msg_ptr);
-    */
-    /* --- End REMOVE Apply hyperlink tags --- */
+    /* Hyperlink detection logic would need to be adapted or removed if using simple labels */
 }
 
 gboolean update_chat_history_from_network(gpointer data) {
@@ -199,107 +162,69 @@ void load_channel_history(AppWidgets *widgets, uint32_t channel_id) {
         return;
     }
 
+    GtkListBox *list_box = GTK_LIST_BOX(widgets->chat_history);
+
+    // Clear existing messages
+    GList *children = gtk_container_get_children(GTK_CONTAINER(list_box));
+    for (GList *iter = children; iter != NULL; iter = iter->next) {
+        gtk_widget_destroy(GTK_WIDGET(iter->data));
+    }
+    g_list_free(children);
+
     char channel_id_str[32];
     snprintf(channel_id_str, sizeof(channel_id_str), "%u", channel_id);
-    
+
     const char *query = "SELECT u.email, m.content, m.timestamp FROM messages m "
                        "JOIN users u ON m.sender_id = u.user_id "
                        "WHERE m.channel_id = $1 ORDER BY m.timestamp ASC";
     const char *params[1] = {channel_id_str};
-    
+
     PGresult *res = PQexecParams(widgets->db_conn, query, 1, NULL, params, NULL, NULL, 0);
     if (PQresultStatus(res) == PGRES_TUPLES_OK) {
         int rows = PQntuples(res);
-        GtkTextBuffer *buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(widgets->chat_history));
-        
-        // Clear the buffer first
-        GtkTextIter start, end;
-        gtk_text_buffer_get_start_iter(buffer, &start);
-        gtk_text_buffer_get_end_iter(buffer, &end);
-        gtk_text_buffer_delete(buffer, &start, &end);
-        
+
         for (int i = 0; i < rows; i++) {
             const char *sender_email = PQgetvalue(res, i, 0);
             const char *content = PQgetvalue(res, i, 1);
             const char *db_timestamp = PQgetvalue(res, i, 2);
-            
+
             char formatted_time[32];
             format_timestamp(db_timestamp, formatted_time, sizeof(formatted_time));
-            
+
             char display_name[128];
             get_display_name(widgets, sender_email, display_name, sizeof(display_name));
 
-            // Sanitize strings
             const char *safe_display_name_raw_loop = sanitize_utf8(display_name);
             const char *safe_content = sanitize_utf8(content);
 
-            // Escape both display name and content for Pango markup
             char *escaped_display_name_loop = g_markup_escape_text(safe_display_name_raw_loop, -1);
             char *escaped_content = g_markup_escape_text(safe_content, -1);
             if (!escaped_display_name_loop) escaped_display_name_loop = g_strdup("");
             if (!escaped_content) escaped_content = g_strdup("");
-            
-            // Construct Pango markup string
+
             char markup[BUFFER_SIZE + 256];
             snprintf(markup, sizeof(markup),
-                     "<b><span foreground='#786ee1' size='large'>%s</span></b> <span foreground='grey' size='small'>%s</span>\n%s\n\n",
+                     "<b><span foreground='#786ee1' size='large'>%s</span></b> <span foreground='grey' size='small'>%s</span>\n%s",
                      escaped_display_name_loop, formatted_time, escaped_content);
-            
-            // Add markup to chat history
-            gtk_text_buffer_get_end_iter(buffer, &end);
-            gtk_text_buffer_insert_markup(buffer, &end, markup, -1);
 
-            g_free(escaped_display_name_loop); // Free the escaped display name
-            g_free(escaped_content); // Free the escaped content
+            // Add message as a new row
+            add_message_to_list_box(list_box, markup);
 
-            /* --- REMOVE Apply hyperlink tags (in loop) --- */
-            /*
-            GtkTextTagTable *tag_table_loop = gtk_text_buffer_get_tag_table(buffer);
-            GtkTextTag *link_tag_loop = gtk_text_tag_table_lookup(tag_table_loop, "hyperlink");
-            if (!link_tag_loop) {
-                link_tag_loop = gtk_text_buffer_create_tag(buffer, "hyperlink", NULL);
-                 // Store the tag name using g_object_set_data for later retrieval
-                g_object_set_data(G_OBJECT(link_tag_loop), "name", "hyperlink");
-            }
-            // Similar search and apply logic as above, but needs to be careful about offsets
-            // within the loop as the buffer grows. Searching the whole buffer each time is inefficient
-            // but simpler to implement correctly for now.
-            GtkTextIter search_start_iter_loop, search_end_iter_loop;
-            gtk_text_buffer_get_start_iter(buffer, &search_start_iter_loop);
-            gtk_text_buffer_get_end_iter(buffer, &search_end_iter_loop);
-            const char *buffer_text_loop = gtk_text_buffer_get_text(buffer, &search_start_iter_loop, &search_end_iter_loop, FALSE);
-            const char *current_pos_loop = buffer_text_loop;
-            while (current_pos_loop) {
-                const char *url_start_ptr_loop = strstr(current_pos_loop, "http://");
-                const char *https_url_start_ptr_loop = strstr(current_pos_loop, "https://");
-                if (https_url_start_ptr_loop && (!url_start_ptr_loop || https_url_start_ptr_loop < url_start_ptr_loop)) {
-                    url_start_ptr_loop = https_url_start_ptr_loop;
-                }
-                if (!url_start_ptr_loop) break;
-                const char *url_end_ptr_loop = url_start_ptr_loop;
-                while (*url_end_ptr_loop && !isspace((unsigned char)*url_end_ptr_loop) && *url_end_ptr_loop != '\n') {
-                    url_end_ptr_loop++;
-                }
-                if (url_start_ptr_loop < url_end_ptr_loop) {
-                    GtkTextIter url_start_iter_loop, url_end_iter_loop;
-                    gint start_offset_loop = url_start_ptr_loop - buffer_text_loop;
-                    gint end_offset_loop = url_end_ptr_loop - buffer_text_loop;
-                    gtk_text_buffer_get_iter_at_offset(buffer, &url_start_iter_loop, start_offset_loop);
-                    gtk_text_buffer_get_iter_at_offset(buffer, &url_end_iter_loop, end_offset_loop);
-                    gtk_text_buffer_apply_tag(buffer, link_tag_loop, &url_start_iter_loop, &url_end_iter_loop);
-                }
-                current_pos_loop = url_end_ptr_loop;
-            }
-            g_free((gpointer)buffer_text_loop);
-            */
-            /* --- End REMOVE Apply hyperlink tags (in loop) --- */
+            g_free(escaped_display_name_loop);
+            g_free(escaped_content);
         }
-        
-        // Scroll to the end
-        gtk_text_buffer_get_end_iter(buffer, &end);
-        GtkTextMark *mark = gtk_text_buffer_create_mark(buffer, "end", &end, FALSE);
-        gtk_text_view_scroll_to_mark(GTK_TEXT_VIEW(widgets->chat_history), mark, 0.0, TRUE, 0.0, 1.0); // Scroll smoothly
-        gtk_text_buffer_delete_mark(buffer, mark);
+        // Auto-scroll to the bottom after loading all messages
+        // The add_message_to_list_box function handles scrolling incrementally,
+        // but a final scroll ensures we are at the very bottom.
+        GtkWidget *scrolled_window = gtk_widget_get_ancestor(GTK_WIDGET(list_box), GTK_TYPE_SCROLLED_WINDOW);
+        if (scrolled_window) {
+            GtkAdjustment *vadj = gtk_scrolled_window_get_vadjustment(GTK_SCROLLED_WINDOW(scrolled_window));
+            gtk_adjustment_set_value(vadj, gtk_adjustment_get_upper(vadj) - gtk_adjustment_get_page_size(vadj));
+        }
+    } else {
+        printf("❌ Failed to load channel history: %s\n", PQerrorMessage(widgets->db_conn));
+        // Optionally add an error message row to the list box
+        add_message_to_list_box(list_box, "<span foreground='red'>Error loading history.</span>");
     }
     PQclear(res);
 }
