@@ -69,6 +69,7 @@ void* handle_client(void* arg) {
 }
 
 int main(int argc, char *argv[]) {
+    // Load environment variables from the .env file
     if (!load_env(".env")) {
         fprintf(stderr, "Failed to load .env file\n");
         return EXIT_FAILURE;
@@ -105,8 +106,21 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
+    // Retrieve the server IP from the environment variable
+    const char *server_ip = getenv("SERVER_IP");
+    if (!server_ip) {
+        fprintf(stderr, "SERVER_IP environment variable not set!\n");
+        return EXIT_FAILURE;
+    }
+
     address.sin_family = AF_INET;
-    address.sin_addr.s_addr = INADDR_ANY;
+    // Convert the server IP string to a usable format
+    if (inet_pton(AF_INET, server_ip, &address.sin_addr) <= 0) {
+        perror("inet_pton failed");
+        CLOSESOCKET(server_fd);
+        return EXIT_FAILURE;
+    }
+
     address.sin_port = htons(PORT);
 
     if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
@@ -121,7 +135,7 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
-    printf("✅ Server is listening on port %d...\n", PORT);
+    printf("✅ Server is listening on IP %s and port %d...\n", server_ip, PORT);
 
     while (1) {
         ClientData *data = malloc(sizeof(ClientData));

@@ -51,7 +51,7 @@ GtkWidget *create_login_page(AppWidgets *widgets) {
 
     // Create register navigation button
     GtkWidget *register_button = gtk_button_new_with_label("Don't have an account? Register");
-    gtk_widget_set_name(register_button, "register-nav-button");
+    gtk_widget_set_name(register_button, "register-button");
     g_signal_connect(register_button, "clicked", G_CALLBACK(on_register_nav_button_clicked), widgets);
     gtk_box_pack_start(GTK_BOX(vbox), register_button, FALSE, FALSE, 5);
 
@@ -124,6 +124,12 @@ LoginPage* login_page_new(AppWidgets *app_widgets) {
     page->container = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
     gtk_widget_set_halign(page->container, GTK_ALIGN_CENTER);
     gtk_widget_set_valign(page->container, GTK_ALIGN_CENTER);
+
+    // Image logo
+    GdkPixbuf *pixbuf = gdk_pixbuf_new_from_file_at_scale("icon.png", 500, 500, TRUE, NULL);
+    GtkWidget *logo_image = gtk_image_new_from_pixbuf(pixbuf);
+    g_object_unref(pixbuf);
+    gtk_box_pack_start(GTK_BOX(page->container), logo_image, FALSE, FALSE, 0);
     
     // Title
     GtkWidget *title = gtk_label_new("Login");

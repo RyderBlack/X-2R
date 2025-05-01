@@ -1,70 +1,157 @@
+/* === Global Styles === */
 window {
-    background-color: black;
+    background-color: #1a1a1a;
+    color: #d3d3d3;
+    font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
 }
 
+/* === Titles === */
 #login-title, #register-title {
-    font-size: 24px;
-    color: red;
-    margin-bottom: 20px;
+    font-size: 42px;
+    font-family: "Beyond Mars";
+    font-weight: bold;
+    color: #786ee1;
+    margin-bottom: 25px;
 }
 
 #channels-title, #contacts-title {
-    font-size: 18px;
-    color: red;
+    font-size: 22px;
+    color: #6b5cd0;
     font-weight: bold;
+    margin: 10px;
+    letter-spacing: 1px;
 }
 
 #channel-name {
-    font-size: 20px;
-    color: red;
+    font-size: 26px;
+    color: #f0f0f0;
     font-weight: bold;
+    margin: 10px 15px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #444;
 }
 
+/* === Input Fields === */
 entry {
-    padding: 8px;
-    border-radius: 4px;
-    border: 1px solid red;
-    color: white;
-    background-color: black;
+    padding: 10px;
+    border-radius: 5px;
+    border: 1px solid #555;
+    color: #f0f0f0;
+    background-color: #3c3c3c;
     margin: 5px 0;
 }
 
 entry:focus {
-    border-color: #ff3333;
+    border-color: #665cd0;
+    box-shadow: 0 0 3px rgb(75, 67, 154);
 }
 
-#login-button, #register-button, #register-nav-button, #back-button, #send-button {
+/* === Buttons === */
+button {
     padding: 10px 20px;
-    background-color: red;
-    color: red;
+    background-color: #4a4a4a;
+    color: #f0f0f0;
     border: none;
-    border-radius: 4px;
+    border-radius: 5px;
+    font-weight: bold;
+    transition: background-color 0.2s ease;
 }
 
-#login-button:hover, #register-button:hover, #register-nav-button:hover, #back-button:hover, #send-button:hover {
-    background-color: #cc0000;
+button:hover {
+    background-color: #5a5a5a;
 }
 
+/* Specific button styling if needed */
+button#login-button,
+button#register-submit-button, button#register-button, button#register-nav-button,
+button#send-button, button#back-button {
+    background-color: #665cd0;
+    color: #f0f0f0;
+}
+
+#register-nav-button, #back-button {
+    margin-top: 5px;
+}
+
+/*button#back-button {*/
+/*    background-color: #4a4a4a;*/
+/*    color: #f0f0f0;*/
+/*}*/
+
+#login-button label,
+#register-nav-button label,
+#register-submit-button label,
+#register-button label,
+#back-button label,
+#send-button label {
+    color: #665cd0;
+    font-size: 12pt;
+}
+
+/* === Chat Area === */
 #chat-history {
-    background-color: #111111;
-    color: white;
+    background-color: #232323;
+    color: #e0e0e0;
+    padding: 10px;
+    font-size: 24px;
+}
+#chat-history text {
+    margin-top: 10px;
 }
 
+
+/* === Side Panels === */
 #channels-box, #contacts-box {
-    background-color: #1a1a1a;
-    border-right: 1px solid #333333;
-    border-left: 1px solid #333333;
+    background-color: #252525;
+    border-right: 1px solid #444;
+    border-left: 1px solid #444;
 }
 
 #channels-list, #contacts-list {
-    background-color: #1a1a1a;
-    color: white;
+    background-color: transparent;
+    color: #b0b0b0;
 }
 
-#channels-list label, #contacts-list label {
-    padding: 8px 0;
+#channels-list listboxrow, #contacts-list listboxrow {
+    padding: 8px 10px;
+    border-bottom: 1px solid #383838;
+    transition: background-color 0.2s ease;
 }
 
-#channels-list label:hover, #contacts-list label:hover {
-    background-color: #333333;
-} 
+#channels-list listboxrow:hover, #contacts-list listboxrow:hover {
+    background-color: #3a3a3a;
+}
+
+#channels-list listboxrow {
+    background-color: #786ee1;
+}
+
+#channels-list listboxrow label {
+    color: #1e1e1e;
+    font-weight: bold;
+}
+
+/* === Scrollbars === */
+scrollbar {
+    background-color: #2b2b2b;
+}
+
+scrollbar slider {
+    background-color: #555;
+    border-radius: 5px;
+    border: 1px solid #444;
+}
+
+scrollbar button {
+    background-color: transparent;
+    min-height: 0px;
+    min-width: 0px;
+    padding: 0px;
+}
+
+
+/*=== Font ===*/
+/** {*/
+/*    font-family: "Beyond Mars";*/
+/*    font-size: 12pt;*/
+/*}*/

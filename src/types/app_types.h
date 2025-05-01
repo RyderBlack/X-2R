@@ -1,5 +1,3 @@
-// gtk.h – Ton header central pour les fonctions liées à l'interface GTK
-
 #ifndef GTK_WRAPPER_H
 #define GTK_WRAPPER_H
 
@@ -52,15 +50,15 @@ extern void show_error_dialog(GtkWidget *parent, const char *message);
 extern void load_channel_history(AppWidgets *widgets, uint32_t channel_id);
 extern Message* create_registration_message(const char *firstname, const char *lastname, const char *email, const char *password);
 
-// === Fonctions pour initialiser l'application ===
+// === initialize application ===
 void activate_login(GtkApplication *app, gpointer user_data);
 void activate_home(GtkApplication *app, gpointer user_data);
 
-// === Utilitaires ===
+// === Utils ===
 GtkWidget* create_login_window(GtkApplication *app);
 GtkWidget* create_home_window(GtkApplication *app);
 
 // === CSS Styling ===
 void load_css(void);
 
-#endif // GTK_WRAPPER_H
+#endif

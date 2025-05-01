@@ -89,7 +89,6 @@ static const char* sanitize_utf8(const char* input) {
 }
 
 // Helper to sanitize UTF-8 strings for GTK display
-// NOTE: Consider moving this to gtk_string_utils.c if not already there
 static const char* sanitize_utf8_gtk(const char *str) {
     if (!str || !g_utf8_validate(str, -1, NULL)) {
         return "[Invalid UTF-8]";
@@ -189,10 +188,10 @@ static gboolean on_window_delete(GtkWidget *widget, GdkEvent *event, gpointer da
     AppWidgets *widgets = (AppWidgets *)data;
     widgets->is_running = FALSE;
     
-    // Close the socket to wake up the receive thread
+    // Close the socket to wake up the received thread
     CLOSE_SOCKET(widgets->server_socket);
     
-    // Wait for the receive thread to finish
+    // Wait for the received thread to finish
     pthread_join(widgets->receive_thread, NULL);
     
     return FALSE; // Allow the window to close
@@ -271,10 +270,20 @@ static void ensure_default_role(PGconn *db_conn) {
         printf("✅ Roles already exist in the database\n");
     }
 }
-
 // Main function
 int main(int argc, char *argv[]) {
     gtk_init(&argc, &argv);
+    if (!load_env(".env")) {
+        fprintf(stderr, "Failed to load .env file\n");
+        return 1;
+    }
+
+    // Retrieve the server IP from environment variable
+    const char *server_ip = getenv("SERVER_IP");
+    if (!server_ip) {
+        fprintf(stderr, "SERVER_IP environment variable not set!\n");
+        return 1;
+    }
 
     // Initialize networking
     INIT_NETWORKING();
@@ -286,11 +295,16 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    // Connect to server
+    // Connect to server using the IP from the environment variable
     struct sockaddr_in serv_addr;
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_port = htons(8080);
-    inet_pton(AF_INET, "127.0.0.1", &serv_addr.sin_addr);
+
+    if (inet_pton(AF_INET, server_ip, &serv_addr.sin_addr) <= 0) {
+        perror("inet_pton failed");
+        CLOSE_SOCKET(sock);
+        return 1;
+    }
 
     if (connect(sock, (struct sockaddr*)&serv_addr, sizeof(serv_addr)) < 0) {
         perror("Connection failed");
@@ -305,7 +319,7 @@ int main(int argc, char *argv[]) {
         CLOSE_SOCKET(sock);
         return 1;
     }
-    
+
     // Ensure default roles exist
     ensure_default_role(db_conn);
 
@@ -318,8 +332,11 @@ int main(int argc, char *argv[]) {
 
     // Create the window
     app_widgets.window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-    gtk_window_set_title(GTK_WINDOW(app_widgets.window), "Diskorde");
-    gtk_window_set_default_size(GTK_WINDOW(app_widgets.window), 1000, 600);
+    if (!gtk_window_set_icon_from_file(GTK_WINDOW(app_widgets.window), "icon.png", NULL)) {
+        g_warning("Failed to load icon.");
+    }
+    gtk_window_set_title(GTK_WINDOW(app_widgets.window), "X-2R");
+    gtk_window_set_default_size(GTK_WINDOW(app_widgets.window), 1920, 1080);
     g_object_set_data(G_OBJECT(app_widgets.window), "widgets", &app_widgets);
 
     // Connect window signals
@@ -336,16 +353,13 @@ int main(int argc, char *argv[]) {
     ChatPage *chat_page = chat_page_new(&app_widgets);
 
     // Store widget pointers from pages into the global AppWidgets struct
-    // (This is a temporary workaround for functions in chat_utils needing them)
-    app_widgets.username_entry = login_page->username_entry; 
+    app_widgets.username_entry = login_page->username_entry;
     app_widgets.password_entry = login_page->password_entry;
-    // ... (add other login widgets if needed by global functions)
 
     app_widgets.register_firstname_entry = register_page->firstname_entry;
     app_widgets.register_lastname_entry = register_page->lastname_entry;
     app_widgets.register_email_entry = register_page->email_entry;
     app_widgets.register_password_entry = register_page->password_entry;
-    // ... (add other register widgets if needed by global functions)
 
     app_widgets.chat_input = chat_page->chat_input;
     app_widgets.chat_history = chat_page->chat_history;
@@ -354,11 +368,11 @@ int main(int argc, char *argv[]) {
     app_widgets.channel_name = chat_page->channel_name;
 
     // Add pages to stack
-    gtk_stack_add_named(GTK_STACK(app_widgets.stack), 
+    gtk_stack_add_named(GTK_STACK(app_widgets.stack),
                        login_page_get_container(login_page), "login");
-    gtk_stack_add_named(GTK_STACK(app_widgets.stack), 
+    gtk_stack_add_named(GTK_STACK(app_widgets.stack),
                        register_page_get_container(register_page), "register");
-    gtk_stack_add_named(GTK_STACK(app_widgets.stack), 
+    gtk_stack_add_named(GTK_STACK(app_widgets.stack),
                        chat_page_get_container(chat_page), "chat");
 
     // Set default page
@@ -367,22 +381,24 @@ int main(int argc, char *argv[]) {
     // Load CSS
     GtkCssProvider *provider = gtk_css_provider_new();
     GError *error = NULL;
-    
+
     const gchar *css_path = g_getenv("GTK_CSS_PATH");
     if (!css_path) {
         g_warning("GTK_CSS_PATH environment variable not set");
         // Correct fallback path relative to the build directory
-        css_path = "../src/styles/app.css"; 
+        css_path = "C:\\Users\\ryrym_i6sf5hg\\CLionProjects\\X-RR\\src\\styles\\app.css";
     }
-    
+
     if (!gtk_css_provider_load_from_path(provider, css_path, &error)) {
         g_warning("Failed to load CSS file '%s': %s", css_path, error->message);
         g_error_free(error);
     }
-    
-    gtk_style_context_add_provider_for_screen(gdk_screen_get_default(),
-                                            GTK_STYLE_PROVIDER(provider),
-                                            GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+
+    gtk_style_context_add_provider_for_screen(
+    gdk_screen_get_default(),
+    GTK_STYLE_PROVIDER(provider),
+    GTK_STYLE_PROVIDER_PRIORITY_USER
+    );
 
     // Start receive thread
     if (pthread_create(&app_widgets.receive_thread, NULL, receive_messages, &app_widgets) != 0) {

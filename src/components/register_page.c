@@ -89,7 +89,7 @@ RegisterPage* register_page_new(AppWidgets *app_widgets) {
     
     // Register button
     page->register_button = gtk_button_new_with_label("Register");
-    gtk_widget_set_name(page->register_button, "register-button");
+    gtk_widget_set_name(page->register_button, "register-submit-button");
     g_signal_connect(page->register_button, "clicked", G_CALLBACK(on_register_button_clicked), page);
     gtk_box_pack_start(GTK_BOX(page->container), page->register_button, FALSE, FALSE, 10);
     

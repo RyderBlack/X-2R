@@ -5,7 +5,7 @@ setlocal
 set APP_DIR=%~dp0..
 
 :: Set the CSS path
-set GTK_CSS_PATH=%APP_DIR%\share\@PROJECT_NAME@\styles\app.css
+set GTK_CSS_PATH=%APP_DIR%\share\@PROJECT_NAME@\src\styles\app.css
 
 :: Run the application
 "%APP_DIR%\bin\@PROJECT_NAME@" %* 
