@@ -86,9 +86,15 @@ void update_chat_history(AppWidgets *widgets, const char *sender, const char *me
     
     printf("📝 Updating chat history: [%s] %s: %s\n", time_str, display_name, message);
     
-    const char *safe_display_name = sanitize_utf8(display_name);
+    const char *safe_display_name_raw = sanitize_utf8(display_name);
     const char *safe_message = sanitize_utf8(message);
     
+    // Escape both display name and message for Pango markup
+    char *escaped_display_name = g_markup_escape_text(safe_display_name_raw, -1);
+    char *escaped_message = g_markup_escape_text(safe_message, -1);
+    if (!escaped_display_name) escaped_display_name = g_strdup(""); // Handle allocation failure
+    if (!escaped_message) escaped_message = g_strdup(""); // Handle allocation failure
+
     GtkTextBuffer *buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(widgets->chat_history));
     GtkTextIter end;
     gtk_text_buffer_get_end_iter(buffer, &end);
@@ -97,15 +103,77 @@ void update_chat_history(AppWidgets *widgets, const char *sender, const char *me
     char markup[BUFFER_SIZE + 256]; // Extra space for markup tags
     snprintf(markup, sizeof(markup),
              "<b><span foreground='#786ee1' size='large'>%s</span></b> <span foreground='grey' size='small'>%s</span>\n%s\n\n",
-             safe_display_name, time_str, safe_message);
+             escaped_display_name, time_str, escaped_message);
 
     // Insert markup into buffer
     gtk_text_buffer_insert_markup(buffer, &end, markup, -1);
     
+    g_free(escaped_display_name); // Free the escaped display name
+    g_free(escaped_message); // Free the escaped message
+
     // Auto-scroll
     GtkTextMark *mark = gtk_text_buffer_create_mark(buffer, "end", &end, FALSE);
     gtk_text_view_scroll_to_mark(GTK_TEXT_VIEW(widgets->chat_history), mark, 0.0, TRUE, 0.0, 1.0); // Scroll smoothly
     gtk_text_buffer_delete_mark(buffer, mark);
+
+    /* --- REMOVE Apply hyperlink tags --- */
+    /*
+    GtkTextTagTable *tag_table = gtk_text_buffer_get_tag_table(buffer);
+    GtkTextTag *link_tag = gtk_text_tag_table_lookup(tag_table, "hyperlink");
+    if (!link_tag) {
+        // Create tag without hardcoded style
+        link_tag = gtk_text_buffer_create_tag(buffer, "hyperlink", NULL);
+        // Store the tag name using g_object_set_data for later retrieval
+        g_object_set_data(G_OBJECT(link_tag), "name", "hyperlink");
+    }
+
+    // Get the range where the message content was inserted
+    GtkTextIter message_start_iter;
+    // We need the start iter of the *actual* message content, not the whole markup
+    // Let's find the beginning of the escaped_message within the inserted markup range
+    // This is tricky because markup insertion might not map directly to simple text ranges.
+    // A simpler approach for now: Search the entire buffer. This is inefficient.
+    // TODO: Find a better way to get the exact range of the inserted message content.
+    gtk_text_buffer_get_start_iter(buffer, &message_start_iter); // Search from start for now
+    GtkTextIter search_end_iter;
+    gtk_text_buffer_get_end_iter(buffer, &search_end_iter);
+
+    const char *msg_ptr = gtk_text_buffer_get_text(buffer, &message_start_iter, &search_end_iter, FALSE);
+    const char *current_pos = msg_ptr;
+    while (current_pos) {
+        const char *url_start_ptr = strstr(current_pos, "http://");
+        const char *https_url_start_ptr = strstr(current_pos, "https://");
+
+        // Find the earliest occurring URL
+        if (https_url_start_ptr && (!url_start_ptr || https_url_start_ptr < url_start_ptr)) {
+            url_start_ptr = https_url_start_ptr;
+        }
+
+        if (!url_start_ptr) break; // No more URLs found
+
+        const char *url_end_ptr = url_start_ptr;
+        while (*url_end_ptr && !isspace((unsigned char)*url_end_ptr) && *url_end_ptr != '\n') {
+            url_end_ptr++;
+        }
+
+        if (url_start_ptr < url_end_ptr) {
+            // Calculate iters in the buffer corresponding to the found URL pointers
+            GtkTextIter url_start_iter, url_end_iter;
+            gint start_offset = url_start_ptr - msg_ptr;
+            gint end_offset = url_end_ptr - msg_ptr;
+
+            gtk_text_buffer_get_iter_at_offset(buffer, &url_start_iter, start_offset);
+            gtk_text_buffer_get_iter_at_offset(buffer, &url_end_iter, end_offset);
+
+            // Apply the tag
+            gtk_text_buffer_apply_tag(buffer, link_tag, &url_start_iter, &url_end_iter);
+        }
+        
+        current_pos = url_end_ptr; // Continue searching after this URL
+    }
+    g_free((gpointer)msg_ptr);
+    */
+    /* --- End REMOVE Apply hyperlink tags --- */
 }
 
 gboolean update_chat_history_from_network(gpointer data) {
@@ -162,18 +230,69 @@ void load_channel_history(AppWidgets *widgets, uint32_t channel_id) {
             get_display_name(widgets, sender_email, display_name, sizeof(display_name));
 
             // Sanitize strings
-            const char *safe_display_name = sanitize_utf8(display_name);
+            const char *safe_display_name_raw_loop = sanitize_utf8(display_name);
             const char *safe_content = sanitize_utf8(content);
+
+            // Escape both display name and content for Pango markup
+            char *escaped_display_name_loop = g_markup_escape_text(safe_display_name_raw_loop, -1);
+            char *escaped_content = g_markup_escape_text(safe_content, -1);
+            if (!escaped_display_name_loop) escaped_display_name_loop = g_strdup("");
+            if (!escaped_content) escaped_content = g_strdup("");
             
             // Construct Pango markup string
             char markup[BUFFER_SIZE + 256];
             snprintf(markup, sizeof(markup),
                      "<b><span foreground='#786ee1' size='large'>%s</span></b> <span foreground='grey' size='small'>%s</span>\n%s\n\n",
-                     safe_display_name, formatted_time, safe_content);
+                     escaped_display_name_loop, formatted_time, escaped_content);
             
             // Add markup to chat history
             gtk_text_buffer_get_end_iter(buffer, &end);
             gtk_text_buffer_insert_markup(buffer, &end, markup, -1);
+
+            g_free(escaped_display_name_loop); // Free the escaped display name
+            g_free(escaped_content); // Free the escaped content
+
+            /* --- REMOVE Apply hyperlink tags (in loop) --- */
+            /*
+            GtkTextTagTable *tag_table_loop = gtk_text_buffer_get_tag_table(buffer);
+            GtkTextTag *link_tag_loop = gtk_text_tag_table_lookup(tag_table_loop, "hyperlink");
+            if (!link_tag_loop) {
+                link_tag_loop = gtk_text_buffer_create_tag(buffer, "hyperlink", NULL);
+                 // Store the tag name using g_object_set_data for later retrieval
+                g_object_set_data(G_OBJECT(link_tag_loop), "name", "hyperlink");
+            }
+            // Similar search and apply logic as above, but needs to be careful about offsets
+            // within the loop as the buffer grows. Searching the whole buffer each time is inefficient
+            // but simpler to implement correctly for now.
+            GtkTextIter search_start_iter_loop, search_end_iter_loop;
+            gtk_text_buffer_get_start_iter(buffer, &search_start_iter_loop);
+            gtk_text_buffer_get_end_iter(buffer, &search_end_iter_loop);
+            const char *buffer_text_loop = gtk_text_buffer_get_text(buffer, &search_start_iter_loop, &search_end_iter_loop, FALSE);
+            const char *current_pos_loop = buffer_text_loop;
+            while (current_pos_loop) {
+                const char *url_start_ptr_loop = strstr(current_pos_loop, "http://");
+                const char *https_url_start_ptr_loop = strstr(current_pos_loop, "https://");
+                if (https_url_start_ptr_loop && (!url_start_ptr_loop || https_url_start_ptr_loop < url_start_ptr_loop)) {
+                    url_start_ptr_loop = https_url_start_ptr_loop;
+                }
+                if (!url_start_ptr_loop) break;
+                const char *url_end_ptr_loop = url_start_ptr_loop;
+                while (*url_end_ptr_loop && !isspace((unsigned char)*url_end_ptr_loop) && *url_end_ptr_loop != '\n') {
+                    url_end_ptr_loop++;
+                }
+                if (url_start_ptr_loop < url_end_ptr_loop) {
+                    GtkTextIter url_start_iter_loop, url_end_iter_loop;
+                    gint start_offset_loop = url_start_ptr_loop - buffer_text_loop;
+                    gint end_offset_loop = url_end_ptr_loop - buffer_text_loop;
+                    gtk_text_buffer_get_iter_at_offset(buffer, &url_start_iter_loop, start_offset_loop);
+                    gtk_text_buffer_get_iter_at_offset(buffer, &url_end_iter_loop, end_offset_loop);
+                    gtk_text_buffer_apply_tag(buffer, link_tag_loop, &url_start_iter_loop, &url_end_iter_loop);
+                }
+                current_pos_loop = url_end_ptr_loop;
+            }
+            g_free((gpointer)buffer_text_loop);
+            */
+            /* --- End REMOVE Apply hyperlink tags (in loop) --- */
         }
         
         // Scroll to the end

@@ -14,9 +14,10 @@ else()
     set(PLATFORM_LIBS "")
 endif()
 
-# --- Setup for GTK3 ---
+# --- Setup for GTK3 --- (and GLib)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(GTK3 REQUIRED gtk+-3.0)
+pkg_check_modules(GLIB REQUIRED glib-2.0) # Find GLib
 include_directories(${GTK3_INCLUDE_DIRS})
 
 # --- PostgreSQL Setup ---
@@ -87,7 +88,7 @@ target_include_directories(server PRIVATE
 
 target_include_directories(gtk_app PRIVATE
     ${CMAKE_SOURCE_DIR}
-    ${GTK3_INCLUDE_DIRS}
+    ${GTK3_INCLUDE_DIRS} # GTK3 already includes GLib includes
     ${POSTGRESQL_INCLUDE_DIRS}
     C:/msys64/mingw64/include
 )

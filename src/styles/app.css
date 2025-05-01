@@ -98,7 +98,6 @@ button#send-button, button#back-button {
     margin-top: 10px;
 }
 
-
 /* === Side Panels === */
 #channels-box, #contacts-box {
     background-color: #252525;
@@ -147,7 +146,6 @@ scrollbar button {
     min-width: 0px;
     padding: 0px;
 }
-
 
 /*=== Font ===*/
 /** {*/

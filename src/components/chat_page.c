@@ -8,6 +8,9 @@
 #include <stdlib.h>
 #include <libpq-fe.h>
 
+// Forward declaration for the event handler
+// static gboolean on_chat_event(GtkWidget *widget, GdkEvent *event, gpointer user_data);
+
 static void on_send_message(GtkButton *button, gpointer user_data) {
     ChatPage *page = (ChatPage *)user_data;
     const gchar *message = gtk_entry_get_text(GTK_ENTRY(page->chat_input));
@@ -44,6 +47,72 @@ static void on_send_message(GtkButton *button, gpointer user_data) {
     free(msg);
     gtk_entry_set_text(GTK_ENTRY(page->chat_input), "");
 }
+
+// Callback function to handle events (like clicks) in chat history
+// static gboolean on_chat_event(GtkWidget *widget, GdkEvent *event, gpointer user_data) {
+//     GtkTextView *text_view = GTK_TEXT_VIEW(widget);
+//     GtkTextBuffer *buffer = gtk_text_view_get_buffer(text_view);
+
+//     // Handle button release events to detect link clicks
+//     if (event->type == GDK_BUTTON_RELEASE) {
+//         GdkEventButton *button_event = (GdkEventButton *)event;
+//         gint buffer_x, buffer_y;
+//         GtkTextIter iter;
+
+//         // Convert window coordinates to buffer coordinates
+//         gtk_text_view_window_to_buffer_coords(text_view,
+//                                               GTK_TEXT_WINDOW_WIDGET, // Use widget window
+//                                               button_event->x,
+//                                               button_event->y,
+//                                               &buffer_x, &buffer_y);
+
+//         // Get the iterator at the clicked location
+//         gtk_text_view_get_iter_at_location(text_view, &iter, buffer_x, buffer_y);
+
+//         // Check if the hyperlink tag is applied at this location
+//         // Note: We need to check if the tag has the name "hyperlink"
+//         // The previous check using g_object_get_data("tag-name") was incorrect.
+//         // We should iterate tags and compare their names directly.
+//         GSList *tags = gtk_text_iter_get_tags(&iter);
+//         gboolean link_found = FALSE;
+//         char *clicked_url = NULL;
+
+//         for (GSList *l = tags; l != NULL; l = l->next) {
+//             GtkTextTag *tag = GTK_TEXT_TAG(l->data);
+//             const gchar* name = g_object_get_data(G_OBJECT(tag), "name"); // Get tag name
+//              if (name && strcmp(name, "hyperlink") == 0) {
+//                 // Found the hyperlink tag. Now get the text range it covers.
+//                 GtkTextIter range_start, range_end;
+//                 range_start = iter;
+//                 range_end = iter;
+//                 
+//                 // Ensure we are inside the tag boundaries before getting text
+//                 if (gtk_text_iter_has_tag(&iter, tag)) {
+//                     // Move iterators to the boundaries of the tag toggle
+//                     gtk_text_iter_backward_to_tag_toggle(&range_start, tag);
+//                     gtk_text_iter_forward_to_tag_toggle(&range_end, tag);
+
+//                     // Extract the text within the tagged range
+//                     clicked_url = gtk_text_buffer_get_text(buffer, &range_start, &range_end, FALSE);
+//                     link_found = TRUE;
+//                     break; // Found the link
+//                 }
+//             }
+//         }
+//         g_slist_free(tags);
+
+//         if (link_found && clicked_url) {
+//             printf("🔗 Link clicked: %s\n", clicked_url);
+//             GtkWidget *window = gtk_widget_get_toplevel(widget);
+//             gtk_show_uri_on_window(GTK_WINDOW(window), clicked_url, GDK_CURRENT_TIME, NULL);
+//             g_free(clicked_url);
+//             return TRUE; // Event handled
+//         }
+//     }
+
+//     // Return FALSE to allow default handling for other events
+//     return FALSE;
+// }
 
 static void on_channel_selected(GtkListBox *list, GtkListBoxRow *row, gpointer user_data) {
     ChatPage *page = (ChatPage *)user_data;
