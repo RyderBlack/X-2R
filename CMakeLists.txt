@@ -4,6 +4,16 @@ project(X-RR C)
 set(CMAKE_C_STANDARD 23)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
+# Platform-specific settings
+if(WIN32)
+    add_definitions(-D_WIN32)
+    set(PLATFORM_SOURCES "")
+    set(PLATFORM_LIBS ws2_32)
+else()
+    set(PLATFORM_SOURCES "")
+    set(PLATFORM_LIBS "")
+endif()
+
 # --- Setup for GTK3 ---
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(GTK3 REQUIRED gtk+-3.0)
@@ -52,6 +62,10 @@ set(GTK_APP_SOURCES
     src/components/login_page.h
     src/components/register_page.h
     src/components/chat_page.h
+    src/utils/chat_utils.c
+    src/utils/chat_utils.h
+    src/utils/gtk_string_utils.c
+    src/utils/gtk_string_utils.h
 )
 
 set(GTK_ONLY_SOURCES
@@ -111,3 +125,50 @@ if(WIN32)
 
 
 endif()
+
+# Install CSS file
+install(FILES src/styles/app.css
+    DESTINATION share/${PROJECT_NAME}/styles
+    PERMISSIONS OWNER_READ GROUP_READ WORLD_READ
+)
+
+# Install executable
+install(TARGETS server gtk_app
+    RUNTIME DESTINATION bin
+)
+
+# Create a script to run the application with the correct CSS path
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/run_gtk_app.bat.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/run_gtk_app.bat"
+    @ONLY
+)
+
+# Install the run script
+install(PROGRAMS "${CMAKE_CURRENT_BINARY_DIR}/run_gtk_app.bat"
+    DESTINATION bin
+)
+
+# Add new sources
+set(SOURCES
+    src/main.c
+    src/main_server.c
+    src/components/chat_page.c
+    src/components/login_page.c
+    src/components/register_page.c
+    src/config/env_loader.c
+    src/database/db_connection.c
+    src/network/protocol.c
+    src/security/encryption.c
+    src/utils/gtk_string_utils.c
+    src/utils/string_utils.c
+    src/utils/chat_utils.c
+)
+
+# Add application icon
+install(FILES src/icon.png DESTINATION bin)
+
+add_custom_command(TARGET gtk_app POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_SOURCE_DIR}/src/icon.png" "${CMAKE_SOURCE_DIR}/icon.png"
+)
