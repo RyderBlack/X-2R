@@ -76,20 +76,16 @@ void update_chat_history(AppWidgets *widgets, const char *sender, const char *me
         return;
     }
     
-    // Get the sender's display name from the database
     char display_name[128];
     get_display_name(widgets, sender, display_name, sizeof(display_name));
     
-    // Get current time for timestamp
     time_t now = time(NULL);
     struct tm *tm_info = localtime(&now);
     char time_str[32];
     strftime(time_str, sizeof(time_str), "%H:%M:%S", tm_info);
     
-    // Print debug info
     printf("📝 Updating chat history: [%s] %s: %s\n", time_str, display_name, message);
     
-    // Sanitize strings to ensure valid UTF-8
     const char *safe_display_name = sanitize_utf8(display_name);
     const char *safe_message = sanitize_utf8(message);
     
@@ -97,17 +93,18 @@ void update_chat_history(AppWidgets *widgets, const char *sender, const char *me
     GtkTextIter end;
     gtk_text_buffer_get_end_iter(buffer, &end);
     
-    // Build a formatted message with sanitized strings
-    char formatted_msg[BUFFER_SIZE];
-    snprintf(formatted_msg, sizeof(formatted_msg), "[%s] %s: %s\n", 
-             time_str, safe_display_name, safe_message);
+    // Construct Pango markup string
+    char markup[BUFFER_SIZE + 256]; // Extra space for markup tags
+    snprintf(markup, sizeof(markup),
+             "<b><span foreground='#786ee1' size='large'>%s</span></b> <span foreground='grey' size='small'>%s</span>\n%s\n\n",
+             safe_display_name, time_str, safe_message);
+
+    // Insert markup into buffer
+    gtk_text_buffer_insert_markup(buffer, &end, markup, -1);
     
-    // Add to chat history
-    gtk_text_buffer_insert(buffer, &end, formatted_msg, -1);
-    
-    // Auto-scroll to the bottom
+    // Auto-scroll
     GtkTextMark *mark = gtk_text_buffer_create_mark(buffer, "end", &end, FALSE);
-    gtk_text_view_scroll_to_mark(GTK_TEXT_VIEW(widgets->chat_history), mark, 0.0, FALSE, 0.0, 0.0);
+    gtk_text_view_scroll_to_mark(GTK_TEXT_VIEW(widgets->chat_history), mark, 0.0, TRUE, 0.0, 1.0); // Scroll smoothly
     gtk_text_buffer_delete_mark(buffer, mark);
 }
 
@@ -158,28 +155,31 @@ void load_channel_history(AppWidgets *widgets, uint32_t channel_id) {
             const char *content = PQgetvalue(res, i, 1);
             const char *db_timestamp = PQgetvalue(res, i, 2);
             
-            // Format timestamp
             char formatted_time[32];
             format_timestamp(db_timestamp, formatted_time, sizeof(formatted_time));
             
-            // Get sender's display name
             char display_name[128];
             get_display_name(widgets, sender_email, display_name, sizeof(display_name));
+
+            // Sanitize strings
+            const char *safe_display_name = sanitize_utf8(display_name);
+            const char *safe_content = sanitize_utf8(content);
             
-            // Format the message
-            char formatted_msg[BUFFER_SIZE];
-            snprintf(formatted_msg, sizeof(formatted_msg), "[%s] %s: %s\n", 
-                     formatted_time, display_name, content);
+            // Construct Pango markup string
+            char markup[BUFFER_SIZE + 256];
+            snprintf(markup, sizeof(markup),
+                     "<b><span foreground='#786ee1' size='large'>%s</span></b> <span foreground='grey' size='small'>%s</span>\n%s\n\n",
+                     safe_display_name, formatted_time, safe_content);
             
-            // Add to chat history
+            // Add markup to chat history
             gtk_text_buffer_get_end_iter(buffer, &end);
-            gtk_text_buffer_insert(buffer, &end, formatted_msg, -1);
+            gtk_text_buffer_insert_markup(buffer, &end, markup, -1);
         }
         
         // Scroll to the end
         gtk_text_buffer_get_end_iter(buffer, &end);
         GtkTextMark *mark = gtk_text_buffer_create_mark(buffer, "end", &end, FALSE);
-        gtk_text_view_scroll_to_mark(GTK_TEXT_VIEW(widgets->chat_history), mark, 0.0, FALSE, 0.0, 0.0);
+        gtk_text_view_scroll_to_mark(GTK_TEXT_VIEW(widgets->chat_history), mark, 0.0, TRUE, 0.0, 1.0); // Scroll smoothly
         gtk_text_buffer_delete_mark(buffer, mark);
     }
     PQclear(res);
