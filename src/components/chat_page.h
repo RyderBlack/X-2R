@@ -12,6 +12,7 @@ typedef struct {
     GtkWidget *chat_channels_list;
     GtkWidget *contacts_list;
     GtkWidget *channel_name;
+    GtkWidget *logout_button;
 } ChatPage;
 
 ChatPage* chat_page_new(AppWidgets *app_widgets);

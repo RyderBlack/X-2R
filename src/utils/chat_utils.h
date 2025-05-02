@@ -31,4 +31,7 @@ void load_channel_history(AppWidgets *widgets, uint32_t channel_id);
 // Function to format timestamp (potentially move definition too)
 void format_timestamp(const char *db_timestamp, char *formatted_time, size_t size);
 
+// Function to update user status in the database
+void update_user_status(AppWidgets *widgets, const char *username, const char *status);
+
 #endif 

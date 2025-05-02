@@ -502,4 +502,24 @@ void format_timestamp(const char *db_timestamp, char *formatted_time, size_t siz
         sscanf(db_timestamp, "%d-%d-%d %d:%d:%d", &year, &month, &day, &hour, &minute, &second);
     #endif
     snprintf(formatted_time, size, "%02d:%02d:%02d", hour, minute, second);
+}
+
+// Function to update user status
+void update_user_status(AppWidgets *widgets, const char *username, const char *status) {
+    if (!widgets || !widgets->db_conn || !username || !status) {
+        printf("❌ Invalid parameters for update_user_status\n");
+        return;
+    }
+
+    printf("🔄 Updating status for user %s to %s\n", username, status);
+
+    const char *update_query = "UPDATE users SET status = $1 WHERE email = $2";
+    const char *update_params[2] = {status, username};
+    PGresult *update_res = PQexecParams(widgets->db_conn, update_query, 2, NULL, update_params, NULL, NULL, 0);
+
+    if (PQresultStatus(update_res) != PGRES_COMMAND_OK) {
+        printf("❌ Failed to update user status: %s\n", PQerrorMessage(widgets->db_conn));
+    }
+
+    PQclear(update_res);
 } 

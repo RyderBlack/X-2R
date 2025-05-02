@@ -69,6 +69,9 @@ void on_login_button_clicked(GtkButton *button, gpointer user_data) {
     const gchar *username = gtk_entry_get_text(GTK_ENTRY(page->username_entry));
     const gchar *password = gtk_entry_get_text(GTK_ENTRY(page->password_entry));
     
+    // Print the username being used for login attempt
+    printf("Attempting login with username: %s\n", username ? username : "NULL");
+    
     if (strlen(username) > 0 && strlen(password) > 0) {
         // Get user from database
         const char *query = "SELECT user_id, password FROM users WHERE email = $1";

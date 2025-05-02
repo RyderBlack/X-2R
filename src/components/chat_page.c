@@ -11,6 +11,9 @@
 // Forward declaration for the event handler
 // static gboolean on_chat_event(GtkWidget *widget, GdkEvent *event, gpointer user_data);
 
+// Forward declaration for logout handler
+static void on_logout_button_clicked(GtkButton *button, gpointer user_data);
+
 static void on_send_message(GtkButton *button, gpointer user_data) {
     ChatPage *page = (ChatPage *)user_data;
     const gchar *message = gtk_entry_get_text(GTK_ENTRY(page->chat_input));
@@ -114,6 +117,31 @@ static void on_send_message(GtkButton *button, gpointer user_data) {
 //     return FALSE;
 // }
 
+// Logout button callback
+static void on_logout_button_clicked(GtkButton *button, gpointer user_data) {
+    ChatPage *page = (ChatPage *)user_data;
+    AppWidgets *widgets = page->app_widgets;
+
+    // Update user status to offline
+    update_user_status(widgets, widgets->username, "offline");
+
+    // Switch back to the login page
+    gtk_stack_set_visible_child_name(GTK_STACK(widgets->stack), "login");
+
+    // Optionally clear fields or reset state if needed
+    gtk_entry_set_text(GTK_ENTRY(widgets->username_entry), ""); // Clear username on login page
+    gtk_entry_set_text(GTK_ENTRY(widgets->password_entry), ""); // Clear password on login page
+    widgets->current_channel_id = 0; // Reset current channel
+    // Clear chat history display?
+    GtkListBox *list_box = GTK_LIST_BOX(widgets->chat_history);
+    GList *children = gtk_container_get_children(GTK_CONTAINER(list_box));
+    for (GList *iter = children; iter != NULL; iter = iter->next) {
+        gtk_widget_destroy(GTK_WIDGET(iter->data));
+    }
+    g_list_free(children);
+    gtk_label_set_text(GTK_LABEL(widgets->channel_name), "# Select a channel"); // Reset channel name label
+}
+
 static void on_channel_selected(GtkListBox *list, GtkListBoxRow *row, gpointer user_data) {
     ChatPage *page = (ChatPage *)user_data;
     if (!row) {
@@ -178,6 +206,16 @@ ChatPage* chat_page_new(AppWidgets *app_widgets) {
     GtkWidget *channels_scroll = gtk_scrolled_window_new(NULL, NULL);
     gtk_container_add(GTK_CONTAINER(channels_scroll), page->chat_channels_list);
     gtk_box_pack_start(GTK_BOX(channels_box), channels_scroll, TRUE, TRUE, 0);
+
+    // Add Logout button at the bottom of the channels box
+    page->logout_button = gtk_button_new_with_label("Logout");
+    gtk_widget_set_name(page->logout_button, "logout-button");
+    gtk_widget_set_margin_top(page->logout_button, 10); // Add some space above
+    gtk_widget_set_margin_bottom(page->logout_button, 10); // Add some space below
+    gtk_widget_set_margin_start(page->logout_button, 10);
+    gtk_widget_set_margin_end(page->logout_button, 10);
+    g_signal_connect(page->logout_button, "clicked", G_CALLBACK(on_logout_button_clicked), page);
+    gtk_box_pack_end(GTK_BOX(channels_box), page->logout_button, FALSE, FALSE, 0); // Pack at the end
     
     // 2. Chat area (center)
     GtkWidget *chat_center_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
