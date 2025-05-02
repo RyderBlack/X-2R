@@ -1,11 +1,91 @@
 @echo off
 setlocal
 
-:: Set the application directory
-set APP_DIR=%~dp0..
+echo ===== Starting X-RR GTK App Setup =====
 
-:: Set the CSS path
-set GTK_CSS_PATH=%APP_DIR%\share\@PROJECT_NAME@\src\styles\app.css
+:: Paths provided by CMake
+set GTK_PATH=@GTK_PATH@
+set CMAKE_SOURCE_DIR=@CMAKE_SOURCE_DIR@
+set POSTGRESQL_ROOT=@POSTGRESQL_ROOT@
+set GTK_THEME=Adwaita:dark
 
-:: Run the application
-"%APP_DIR%\bin\@PROJECT_NAME@" %* 
+:: Environment variables for UTF-8 and GTK
+set G_MESSAGES_DEBUG=all
+set LANG=en_US.UTF-8
+set LC_ALL=en_US.UTF-8
+set PANGO_WIN32_NO_UNISCRIBE=1
+set GTK_IM_MODULE=ime
+
+:: Set PATH for DLL lookup
+set PATH=%CD%;%GTK_PATH%;%POSTGRESQL_ROOT%\bin;%PATH%
+
+:: Copy GTK DLLs
+echo Copying GTK DLLs...
+for %%F in (
+    libgtk-3-0.dll
+    libgdk-3-0.dll
+    libgobject-2.0-0.dll
+    libglib-2.0-0.dll
+    libcairo-2.dll
+    libpango-1.0-0.dll
+    libpangocairo-1.0-0.dll
+    libgdk_pixbuf-2.0-0.dll
+    libatk-1.0-0.dll
+    libepoxy-0.dll
+    libffi-8.dll
+    libgio-2.0-0.dll
+    libgmodule-2.0-0.dll
+    libharfbuzz-0.dll
+    libintl-8.dll
+    libpangoft2-1.0-0.dll
+    libpangowin32-1.0-0.dll
+    libpcre-1.dll
+    libpixman-1-0.dll
+    libpng16-16.dll
+    libz.dll
+) do (
+    if exist "%GTK_PATH%\%%F" (
+        copy "%GTK_PATH%\%%F" . >nul
+    ) else (
+        echo WARNING: %%F not found in %GTK_PATH%
+    )
+)
+
+:: Copy .env.client for the client app
+if exist "%CMAKE_SOURCE_DIR%\.env.client" (
+    copy "%CMAKE_SOURCE_DIR%\.env.client" "%~dp0"
+    echo Copied .env.client
+) else (
+    echo WARNING: .env.client not found in project root
+)
+
+:: Copy app.css
+if exist "%CMAKE_SOURCE_DIR%\src\styles\app.css" (
+    copy "%CMAKE_SOURCE_DIR%\src\styles\app.css" "%~dp0"
+    echo Copied app.css
+) else (
+    echo WARNING: app.css not found in src/styles
+)
+
+:: Copy icon.png
+if exist "%CMAKE_SOURCE_DIR%\icon.png" (
+    copy "%CMAKE_SOURCE_DIR%\icon.png" "%~dp0"
+    echo Copied icon.png
+) else (
+    echo WARNING: icon.png not found in project root
+)
+
+:: Verify executable exists
+if not exist "gtk_app.exe" (
+    echo ERROR: gtk_app.exe not found in %CD%
+    pause
+    exit /b 1
+)
+
+echo ===== Running gtk_app.exe =====
+gtk_app.exe
+
+echo ===== Application exited =====
+pause
+
+endlocal

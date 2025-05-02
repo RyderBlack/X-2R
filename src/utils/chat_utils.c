@@ -70,45 +70,73 @@ void get_display_name(AppWidgets *widgets, const char *sender_email, char *displ
     PQclear(res);
 }
 
+// Helper function to add a message row to the list box and scroll
+static void add_message_to_list_box(GtkListBox *list_box, const char *markup) {
+    GtkWidget *label = gtk_label_new(NULL);
+    gtk_label_set_markup(GTK_LABEL(label), markup);
+    gtk_label_set_xalign(GTK_LABEL(label), 0.0); // Align text to the left
+    gtk_label_set_line_wrap(GTK_LABEL(label), TRUE); // Enable line wrapping
+    gtk_label_set_line_wrap_mode(GTK_LABEL(label), PANGO_WRAP_WORD_CHAR);
+    gtk_widget_set_margin_start(label, 10); // Add some left margin
+    gtk_widget_set_margin_end(label, 10);   // Add some right margin
+    gtk_widget_set_margin_top(label, 5);    // Add some top margin
+    gtk_widget_set_margin_bottom(label, 5); // Add some bottom margin
+
+    GtkWidget *row = gtk_list_box_row_new();
+    gtk_container_add(GTK_CONTAINER(row), label);
+    gtk_widget_set_name(row, "chat-message-row"); // Add CSS class for styling
+    gtk_list_box_insert(list_box, row, -1); // Add to the end
+    gtk_widget_show_all(row);
+
+    // Auto-scroll logic for GtkListBox in GtkScrolledWindow
+    GtkWidget *scrolled_window = gtk_widget_get_ancestor(GTK_WIDGET(list_box), GTK_TYPE_SCROLLED_WINDOW);
+    if (scrolled_window) {
+        GtkAdjustment *vadj = gtk_scrolled_window_get_vadjustment(GTK_SCROLLED_WINDOW(scrolled_window));
+        // Scroll only if the user is near the bottom or hasn't scrolled up manually
+        // A simple approach is to always scroll for now
+        // TODO: Add logic to check if user scrolled up
+        gtk_adjustment_set_value(vadj, gtk_adjustment_get_upper(vadj) - gtk_adjustment_get_page_size(vadj));
+    }
+}
+
 void update_chat_history(AppWidgets *widgets, const char *sender, const char *message, const char *channel_name) {
     if (!widgets || !widgets->chat_history || !message) {
         printf("❌ Invalid parameters for update_chat_history\n");
         return;
     }
-    
-    // Get the sender's display name from the database
+
+    GtkListBox *list_box = GTK_LIST_BOX(widgets->chat_history);
+
     char display_name[128];
     get_display_name(widgets, sender, display_name, sizeof(display_name));
-    
-    // Get current time for timestamp
+
     time_t now = time(NULL);
     struct tm *tm_info = localtime(&now);
     char time_str[32];
     strftime(time_str, sizeof(time_str), "%H:%M:%S", tm_info);
-    
-    // Print debug info
-    printf("📝 Updating chat history: [%s] %s: %s\n", time_str, display_name, message);
-    
-    // Sanitize strings to ensure valid UTF-8
-    const char *safe_display_name = sanitize_utf8(display_name);
+
+    printf("📝 Updating chat history (ListBox): [%s] %s: %s\n", time_str, display_name, message);
+
+    const char *safe_display_name_raw = sanitize_utf8(display_name);
     const char *safe_message = sanitize_utf8(message);
-    
-    GtkTextBuffer *buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(widgets->chat_history));
-    GtkTextIter end;
-    gtk_text_buffer_get_end_iter(buffer, &end);
-    
-    // Build a formatted message with sanitized strings
-    char formatted_msg[BUFFER_SIZE];
-    snprintf(formatted_msg, sizeof(formatted_msg), "[%s] %s: %s\n", 
-             time_str, safe_display_name, safe_message);
-    
-    // Add to chat history
-    gtk_text_buffer_insert(buffer, &end, formatted_msg, -1);
-    
-    // Auto-scroll to the bottom
-    GtkTextMark *mark = gtk_text_buffer_create_mark(buffer, "end", &end, FALSE);
-    gtk_text_view_scroll_to_mark(GTK_TEXT_VIEW(widgets->chat_history), mark, 0.0, FALSE, 0.0, 0.0);
-    gtk_text_buffer_delete_mark(buffer, mark);
+
+    char *escaped_display_name = g_markup_escape_text(safe_display_name_raw, -1);
+    char *escaped_message = g_markup_escape_text(safe_message, -1);
+    if (!escaped_display_name) escaped_display_name = g_strdup("");
+    if (!escaped_message) escaped_message = g_strdup("");
+
+    // Construct Pango markup string (similar format, maybe adjust later)
+    char markup[BUFFER_SIZE + 256];
+    snprintf(markup, sizeof(markup),
+             "<b><span foreground='#786ee1' size='large'>%s</span></b> <span foreground='grey' size='small'>%s</span>\n%s",
+             escaped_display_name, time_str, escaped_message);
+
+    add_message_to_list_box(list_box, markup);
+
+    g_free(escaped_display_name);
+    g_free(escaped_message);
+
+    /* Hyperlink detection logic would need to be adapted or removed if using simple labels */
 }
 
 gboolean update_chat_history_from_network(gpointer data) {
@@ -134,53 +162,69 @@ void load_channel_history(AppWidgets *widgets, uint32_t channel_id) {
         return;
     }
 
+    GtkListBox *list_box = GTK_LIST_BOX(widgets->chat_history);
+
+    // Clear existing messages
+    GList *children = gtk_container_get_children(GTK_CONTAINER(list_box));
+    for (GList *iter = children; iter != NULL; iter = iter->next) {
+        gtk_widget_destroy(GTK_WIDGET(iter->data));
+    }
+    g_list_free(children);
+
     char channel_id_str[32];
     snprintf(channel_id_str, sizeof(channel_id_str), "%u", channel_id);
-    
+
     const char *query = "SELECT u.email, m.content, m.timestamp FROM messages m "
                        "JOIN users u ON m.sender_id = u.user_id "
                        "WHERE m.channel_id = $1 ORDER BY m.timestamp ASC";
     const char *params[1] = {channel_id_str};
-    
+
     PGresult *res = PQexecParams(widgets->db_conn, query, 1, NULL, params, NULL, NULL, 0);
     if (PQresultStatus(res) == PGRES_TUPLES_OK) {
         int rows = PQntuples(res);
-        GtkTextBuffer *buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(widgets->chat_history));
-        
-        // Clear the buffer first
-        GtkTextIter start, end;
-        gtk_text_buffer_get_start_iter(buffer, &start);
-        gtk_text_buffer_get_end_iter(buffer, &end);
-        gtk_text_buffer_delete(buffer, &start, &end);
-        
+
         for (int i = 0; i < rows; i++) {
             const char *sender_email = PQgetvalue(res, i, 0);
             const char *content = PQgetvalue(res, i, 1);
             const char *db_timestamp = PQgetvalue(res, i, 2);
-            
-            // Format timestamp
+
             char formatted_time[32];
             format_timestamp(db_timestamp, formatted_time, sizeof(formatted_time));
-            
-            // Get sender's display name
+
             char display_name[128];
             get_display_name(widgets, sender_email, display_name, sizeof(display_name));
-            
-            // Format the message
-            char formatted_msg[BUFFER_SIZE];
-            snprintf(formatted_msg, sizeof(formatted_msg), "[%s] %s: %s\n", 
-                     formatted_time, display_name, content);
-            
-            // Add to chat history
-            gtk_text_buffer_get_end_iter(buffer, &end);
-            gtk_text_buffer_insert(buffer, &end, formatted_msg, -1);
+
+            const char *safe_display_name_raw_loop = sanitize_utf8(display_name);
+            const char *safe_content = sanitize_utf8(content);
+
+            char *escaped_display_name_loop = g_markup_escape_text(safe_display_name_raw_loop, -1);
+            char *escaped_content = g_markup_escape_text(safe_content, -1);
+            if (!escaped_display_name_loop) escaped_display_name_loop = g_strdup("");
+            if (!escaped_content) escaped_content = g_strdup("");
+
+            char markup[BUFFER_SIZE + 256];
+            snprintf(markup, sizeof(markup),
+                     "<b><span foreground='#786ee1' size='large'>%s</span></b> <span foreground='grey' size='small'>%s</span>\n%s",
+                     escaped_display_name_loop, formatted_time, escaped_content);
+
+            // Add message as a new row
+            add_message_to_list_box(list_box, markup);
+
+            g_free(escaped_display_name_loop);
+            g_free(escaped_content);
         }
-        
-        // Scroll to the end
-        gtk_text_buffer_get_end_iter(buffer, &end);
-        GtkTextMark *mark = gtk_text_buffer_create_mark(buffer, "end", &end, FALSE);
-        gtk_text_view_scroll_to_mark(GTK_TEXT_VIEW(widgets->chat_history), mark, 0.0, FALSE, 0.0, 0.0);
-        gtk_text_buffer_delete_mark(buffer, mark);
+        // Auto-scroll to the bottom after loading all messages
+        // The add_message_to_list_box function handles scrolling incrementally,
+        // but a final scroll ensures we are at the very bottom.
+        GtkWidget *scrolled_window = gtk_widget_get_ancestor(GTK_WIDGET(list_box), GTK_TYPE_SCROLLED_WINDOW);
+        if (scrolled_window) {
+            GtkAdjustment *vadj = gtk_scrolled_window_get_vadjustment(GTK_SCROLLED_WINDOW(scrolled_window));
+            gtk_adjustment_set_value(vadj, gtk_adjustment_get_upper(vadj) - gtk_adjustment_get_page_size(vadj));
+        }
+    } else {
+        printf("❌ Failed to load channel history: %s\n", PQerrorMessage(widgets->db_conn));
+        // Optionally add an error message row to the list box
+        add_message_to_list_box(list_box, "<span foreground='red'>Error loading history.</span>");
     }
     PQclear(res);
 }
@@ -340,112 +384,140 @@ void refresh_channel_list(AppWidgets *widgets) {
     gtk_widget_show_all(widgets->chat_channels_list);
 }
 
-void handle_successful_login(AppWidgets *widgets, const char *username) {
-    // Update user status to online
-    const char *update_query = "UPDATE users SET status = 'online' WHERE email = $1";
-    const char *update_params[1] = {username};
-    PGresult *update_res = PQexecParams(widgets->db_conn, update_query, 1, NULL, update_params, NULL, NULL, 0);
-    PQclear(update_res);
-    
-    // Store username
+// Renamed from handle_successful_login
+// This function is now called via g_idle_add from receive_messages
+// after the server confirms login with MSG_LOGIN_SUCCESS.
+// It takes the confirmed username as input (needs casting and freeing).
+gboolean finalize_login_ui_setup(gpointer user_data) {
+    char *username = (char *)user_data; // Cast the username passed from g_idle_add
+    if (!username) return G_SOURCE_REMOVE;
+
+    // Find the AppWidgets pointer (assuming it's stored on the main window)
+    // This is a common pattern, but might need adjustment if AppWidgets isn't stored this way.
+    GList *toplevels = gtk_window_list_toplevels();
+    AppWidgets *widgets = NULL;
+    for (GList *l = toplevels; l != NULL; l = l->next) {
+        widgets = (AppWidgets *)g_object_get_data(G_OBJECT(l->data), "widgets");
+        if (widgets) break; // Found it
+    }
+    g_list_free(toplevels);
+
+    if (!widgets) {
+        fprintf(stderr, "Error: Could not find AppWidgets pointer in finalize_login_ui_setup\n");
+        g_free(username); // Free the username string
+        return G_SOURCE_REMOVE; // Don't run again
+    }
+
+    printf("🚀 Finalizing UI setup for user: %s\n", username);
+
+    // 1. Store username locally in AppWidgets
     strncpy(widgets->username, username, sizeof(widgets->username) - 1);
     widgets->username[sizeof(widgets->username) - 1] = '\0';
-    
-    // Get user_id for the current user
+
+    // Update the user display label
+    if (widgets->user_display_label) {
+        char label_text[100];
+        snprintf(label_text, sizeof(label_text), "Logged in as: %s", widgets->username);
+        gtk_label_set_text(GTK_LABEL(widgets->user_display_label), label_text);
+    }
+
+    // 2. Database operations (like ensuring channels exist) might still be needed
+    //    but status update is now handled by the server.
+    //    Let's keep the channel check/creation logic for now.
     const char *get_user_query = "SELECT user_id FROM users WHERE email = $1";
     const char *get_user_params[1] = {username};
     PGresult *user_res = PQexecParams(widgets->db_conn, get_user_query, 1, NULL, get_user_params, NULL, NULL, 0);
-    
-    int channels_created = 0;
-    
+
     if (PQresultStatus(user_res) == PGRES_TUPLES_OK && PQntuples(user_res) > 0) {
         const char *user_id_str = PQgetvalue(user_res, 0, 0);
-        
-        printf("👤 Found user ID %s for %s\n", user_id_str, username);
-        
-        // Create default channels if they don't exist
-        const char *channels[] = {
-            "general",
-            "movies and tv shows",
-            "memes",
-            "music",
-            "foodies"
-        };
-        
+        printf("👤 Found user ID %s for %s during UI setup\n", user_id_str, username);
+
+        // Create default channels if they don't exist (can be debated if client should do this)
+        const char *channels[] = {"general", "movies and tv shows", "memes", "music", "foodies"};
         for (int i = 0; i < 5; i++) {
             const char *check_channel_query = "SELECT channel_id FROM channels WHERE name = $1";
             const char *check_params[1] = {channels[i]};
             PGresult *check_res = PQexecParams(widgets->db_conn, check_channel_query, 1, NULL, check_params, NULL, NULL, 0);
-            
+
             if (PQresultStatus(check_res) == PGRES_TUPLES_OK && PQntuples(check_res) == 0) {
-                printf("➕ Creating new channel: %s\n", channels[i]);
-                
+                printf("➕ Creating new channel (client-side check): %s\n", channels[i]);
                 const char *create_channel_query = "INSERT INTO channels (name, is_private, created_by) VALUES ($1, FALSE, $2) RETURNING channel_id";
                 const char *create_params[2] = {channels[i], user_id_str};
                 PGresult *create_res = PQexecParams(widgets->db_conn, create_channel_query, 2, NULL, create_params, NULL, NULL, 0);
-                
+
                 if (PQresultStatus(create_res) == PGRES_TUPLES_OK && PQntuples(create_res) > 0) {
-                    channels_created++;
                     printf("✅ Channel created with ID: %s\n", PQgetvalue(create_res, 0, 0));
-                    
-                    // Add user to the created channel with user_channels relation
+                    // Add user to the created channel
                     const char *add_user_query = "INSERT INTO user_channels (user_id, channel_id, role_id) VALUES ($1, $2, 1)";
                     const char *add_user_params[2] = {user_id_str, PQgetvalue(create_res, 0, 0)};
                     PGresult *add_user_res = PQexecParams(widgets->db_conn, add_user_query, 2, NULL, add_user_params, NULL, NULL, 0);
-                    
                     if (PQresultStatus(add_user_res) != PGRES_COMMAND_OK) {
-                        printf("⚠️ Failed to add user to channel: %s\n", PQerrorMessage(widgets->db_conn));
+                         printf("⚠️ Failed to add user to channel: %s\n", PQerrorMessage(widgets->db_conn));
                     }
-                    
                     PQclear(add_user_res);
                 } else {
                     printf("❌ Failed to create channel: %s\n", PQerrorMessage(widgets->db_conn));
                 }
-                
                 PQclear(create_res);
             }
             PQclear(check_res);
         }
-        
-        // Get the general channel ID
+
+        // Get the general channel ID to set as default
         const char *get_general_query = "SELECT channel_id FROM channels WHERE name = 'general'";
         PGresult *general_res = PQexec(widgets->db_conn, get_general_query);
-        
         if (PQresultStatus(general_res) == PGRES_TUPLES_OK && PQntuples(general_res) > 0) {
             widgets->current_channel_id = (uint32_t)atoi(PQgetvalue(general_res, 0, 0));
-            printf("✅ Default channel ID set to: %u\n", widgets->current_channel_id);
+             printf("✅ Default channel ID set to: %u\n", widgets->current_channel_id);
         } else {
-            printf("⚠️ Default channel not found\n");
+            printf("⚠️ Default channel 'general' not found during UI setup\n");
+            widgets->current_channel_id = 0; // Reset if not found
         }
         PQclear(general_res);
+    } else {
+        printf("❌ Could not find user ID for %s during UI setup\n", username);
+         widgets->current_channel_id = 0; // Reset channel ID if user lookup fails
     }
     PQclear(user_res);
-    
-    // Switch to chat view
+
+    // 3. Switch to chat view
     gtk_stack_set_visible_child_name(GTK_STACK(widgets->stack), "chat");
-    
-    // Refresh the channel list
+
+    // 4. Refresh the channel list UI
     refresh_channel_list(widgets);
-    
-    // Load channel history for general channel
+
+    // 5. Load channel history for the default/selected channel
     if (widgets->current_channel_id > 0) {
         load_channel_history(widgets, widgets->current_channel_id);
-        
+
         // Update channel name label
         const char *get_name_query = "SELECT name FROM channels WHERE channel_id = $1";
         char channel_id_str[32];
         snprintf(channel_id_str, sizeof(channel_id_str), "%u", widgets->current_channel_id);
         const char *params[1] = {channel_id_str};
         PGresult *name_res = PQexecParams(widgets->db_conn, get_name_query, 1, NULL, params, NULL, NULL, 0);
-        
+
         if (PQresultStatus(name_res) == PGRES_TUPLES_OK && PQntuples(name_res) > 0) {
-            char label_text[64];
+            char label_text[128]; // Increased size slightly
             snprintf(label_text, sizeof(label_text), "# %s", PQgetvalue(name_res, 0, 0));
             gtk_label_set_text(GTK_LABEL(widgets->channel_name), label_text);
         }
-        
         PQclear(name_res);
+    } else {
+        // If no default channel selected (e.g., 'general' didn't exist or user lookup failed)
+        // Set channel name label appropriately
+        gtk_label_set_text(GTK_LABEL(widgets->channel_name), "# Select a channel");
+        // Clear chat history explicitly if needed
+        GtkListBox *list_box = GTK_LIST_BOX(widgets->chat_history);
+        GList *children = gtk_container_get_children(GTK_CONTAINER(list_box));
+        for (GList *iter = children; iter != NULL; iter = iter->next) {
+            gtk_widget_destroy(GTK_WIDGET(iter->data));
+        }
+        g_list_free(children);
     }
+
+    g_free(username); // Free the username string passed via g_idle_add
+    return G_SOURCE_REMOVE; // Run only once
 }
 
 // Function to format timestamp
@@ -458,4 +530,24 @@ void format_timestamp(const char *db_timestamp, char *formatted_time, size_t siz
         sscanf(db_timestamp, "%d-%d-%d %d:%d:%d", &year, &month, &day, &hour, &minute, &second);
     #endif
     snprintf(formatted_time, size, "%02d:%02d:%02d", hour, minute, second);
+}
+
+// Function to update user status
+void update_user_status(AppWidgets *widgets, const char *username, const char *status) {
+    if (!widgets || !widgets->db_conn || !username || !status) {
+        printf("❌ Invalid parameters for update_user_status\n");
+        return;
+    }
+
+    printf("🔄 Updating status for user %s to %s\n", username, status);
+
+    const char *update_query = "UPDATE users SET status = $1 WHERE email = $2";
+    const char *update_params[2] = {status, username};
+    PGresult *update_res = PQexecParams(widgets->db_conn, update_query, 2, NULL, update_params, NULL, NULL, 0);
+
+    if (PQresultStatus(update_res) != PGRES_COMMAND_OK) {
+        printf("❌ Failed to update user status: %s\n", PQerrorMessage(widgets->db_conn));
+    }
+
+    PQclear(update_res);
 } 

@@ -38,6 +38,9 @@ void show_error_dialog(GtkWidget *parent, const char *message);
 static void ensure_default_role(PGconn *db_conn);
 static gboolean on_window_delete(GtkWidget *widget, GdkEvent *event, gpointer data);
 void* receive_messages(void *arg);
+static gboolean show_login_error_idle(gpointer data);
+static gboolean show_registration_success_idle(gpointer data);
+static gboolean show_registration_failure_idle(gpointer data);
 
 // Function to sanitize UTF-8 strings for Pango
 // NOTE: Consider moving this to gtk_string_utils.c if not already there
@@ -203,36 +206,110 @@ void* receive_messages(void *arg) {
     while (widgets->is_running) {
         Message *msg = receive_message(widgets->server_socket);
         if (!msg) {
+            // Server disconnected or error
+            fprintf(stderr, "Connection lost to server.\n");
+            // Optionally, show an error and switch to login page or exit
+            // g_idle_add(... show_error_dialog_and_quit ... , widgets);
+            widgets->is_running = FALSE; // Stop the loop
             break;
         }
-        if (msg->type == MSG_CHAT) {
-            ChatMessage *chat_msg = (ChatMessage *)msg->payload;
 
-            // Check if the received message is from the current user
-            if (strcmp(chat_msg->sender_username, widgets->username) == 0) {
-                // It's our own message echoed back, ignore it for UI update
-                free(msg);
-                continue; 
+        switch (msg->type) {
+            case MSG_LOGIN_SUCCESS: {
+                LoginSuccessResponse *resp = (LoginSuccessResponse*)msg->payload;
+                printf("✅ Login successful for user: %s\n", resp->username);
+                // Need to run the UI updates on the main GTK thread
+                // Create a copy of the username to pass to the idle function
+                char *username_copy = g_strdup(resp->username);
+                g_idle_add((GSourceFunc)finalize_login_ui_setup, username_copy); // Pass username
+                break;
             }
-
-            // Message is from another user, prepare data for UI update
-            ChatUpdateData *update_data = malloc(sizeof(ChatUpdateData));
-            if (!update_data) {
-                free(msg);
-                continue;
+            case MSG_LOGIN_FAILURE: {
+                printf("❌ Login failed.\n");
+                // Show error dialog on the main thread
+                g_idle_add((GSourceFunc)show_login_error_idle, widgets);
+                break;
             }
-            update_data->widgets = widgets;
-            strncpy(update_data->sender, chat_msg->sender_username, sizeof(update_data->sender) - 1);
-            strncpy(update_data->content, chat_msg->content, sizeof(update_data->content) - 1);
-            update_data->channel_id = chat_msg->channel_id;
-            update_data->sender[sizeof(update_data->sender) - 1] = '\0';
-            update_data->content[sizeof(update_data->content) - 1] = '\0';
+            case MSG_REGISTER_SUCCESS: {
+                printf("✅ Registration successful.\n");
+                g_idle_add((GSourceFunc)show_registration_success_idle, widgets);
+                break;
+            }
+            case MSG_REGISTER_FAILURE: {
+                 printf("❌ Registration failed.\n");
+                 // TODO: Server could send back a reason (e.g., email exists) in payload
+                 g_idle_add((GSourceFunc)show_registration_failure_idle, widgets);
+                 break;
+            }
+            case MSG_CHAT: {
+                ChatMessage *chat_msg = (ChatMessage *)msg->payload;
 
-            g_idle_add((GSourceFunc)update_chat_history_from_network, update_data);
+                // Server now sets the correct sender, so no need to check against widgets->username
+                // Just prepare data for UI update
+                ChatUpdateData *update_data = malloc(sizeof(ChatUpdateData));
+                if (!update_data) {
+                    fprintf(stderr, "Failed to allocate memory for chat update data\n");
+                    break; // Break switch case, msg will be freed below
+                }
+                update_data->widgets = widgets;
+                strncpy(update_data->sender, chat_msg->sender_username, sizeof(update_data->sender) - 1);
+                strncpy(update_data->content, chat_msg->content, sizeof(update_data->content) - 1);
+                update_data->channel_id = chat_msg->channel_id;
+                update_data->sender[sizeof(update_data->sender) - 1] = '\0';
+                update_data->content[sizeof(update_data->content) - 1] = '\0';
+
+                g_idle_add((GSourceFunc)update_chat_history_from_network, update_data);
+                break; // Don't free msg here, let it be freed after switch
+            }
+            // Add cases for other message types like MSG_USER_LIST, MSG_CHANNEL_LIST etc.
+            default: {
+                 printf("❓ Received unhandled message type: %d\n", msg->type);
+                 break;
+            }
         }
         free(msg);
     }
+    printf("Exiting receive thread.\n");
     return NULL;
+}
+
+// Helper function to show login error dialog from idle callback
+static gboolean show_login_error_idle(gpointer data) {
+    AppWidgets *widgets = (AppWidgets *)data;
+    show_error_dialog(widgets->window, "Invalid username or password");
+    return G_SOURCE_REMOVE; // Run only once
+}
+
+// Helper function for registration success
+static gboolean show_registration_success_idle(gpointer data) {
+    AppWidgets *widgets = (AppWidgets *)data;
+    // Show a success message
+    GtkWidget *dialog = gtk_message_dialog_new(GTK_WINDOW(widgets->window),
+                                               GTK_DIALOG_DESTROY_WITH_PARENT,
+                                               GTK_MESSAGE_INFO,
+                                               GTK_BUTTONS_OK,
+                                               "Registration successful! You can now log in.");
+    gtk_dialog_run(GTK_DIALOG(dialog));
+    gtk_widget_destroy(dialog);
+
+    // Switch to the login page
+    gtk_stack_set_visible_child_name(GTK_STACK(widgets->stack), "login");
+    
+    // Clear registration form fields (optional but good practice)
+    gtk_entry_set_text(GTK_ENTRY(widgets->register_firstname_entry), "");
+    gtk_entry_set_text(GTK_ENTRY(widgets->register_lastname_entry), "");
+    gtk_entry_set_text(GTK_ENTRY(widgets->register_email_entry), "");
+    gtk_entry_set_text(GTK_ENTRY(widgets->register_password_entry), "");
+    
+    return G_SOURCE_REMOVE; // Run only once
+}
+
+// Helper function for registration failure
+static gboolean show_registration_failure_idle(gpointer data) {
+    AppWidgets *widgets = (AppWidgets *)data;
+    // TODO: Use specific error from server if provided in payload
+    show_error_dialog(widgets->window, "Registration failed. Email might already exist.");
+    return G_SOURCE_REMOVE; // Run only once
 }
 
 // Function to ensure default role exists
@@ -270,12 +347,15 @@ static void ensure_default_role(PGconn *db_conn) {
         printf("✅ Roles already exist in the database\n");
     }
 }
+
 // Main function
 int main(int argc, char *argv[]) {
     gtk_init(&argc, &argv);
-    if (!load_env(".env")) {
-        fprintf(stderr, "Failed to load .env file\n");
-        return 1;
+    // Load the CLIENT configuration file
+    if (!load_env(".env.client")) { 
+        fprintf(stderr, "Failed to load client configuration .env.client\n");
+        // Consider providing a default server IP or exiting more gracefully
+        return 1; 
     }
 
     // Retrieve the server IP from environment variable

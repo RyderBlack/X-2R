@@ -29,6 +29,7 @@ typedef struct {
     GtkWidget *chat_channels_list;
     GtkWidget *contacts_list;
     GtkWidget *channel_name;
+    GtkWidget *user_display_label;
     SOCKET server_socket;
     pthread_t receive_thread;
     gboolean is_running;

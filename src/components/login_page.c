@@ -3,12 +3,9 @@
 #include "login_page.h"
 #include "../utils/chat_utils.h"
 #include <string.h>
-#include "../database/db_connection.h"
-#include "../security/encryption.h"
 #include "../network/protocol.h"
 #include "../utils/string_utils.h"
 #include <stdlib.h>
-#include <libpq-fe.h>
 
 // Function to create the login page
 GtkWidget *create_login_page(AppWidgets *widgets) {
@@ -66,48 +63,44 @@ GtkWidget *create_login_page(AppWidgets *widgets) {
 
 void on_login_button_clicked(GtkButton *button, gpointer user_data) {
     LoginPage *page = (LoginPage *)user_data;
+    AppWidgets *widgets = page->app_widgets; // Get AppWidgets
     const gchar *username = gtk_entry_get_text(GTK_ENTRY(page->username_entry));
     const gchar *password = gtk_entry_get_text(GTK_ENTRY(page->password_entry));
-    
+
+    printf("🔒 Sending login request for username: %s\n", username ? username : "NULL");
+
     if (strlen(username) > 0 && strlen(password) > 0) {
-        // Get user from database
-        const char *query = "SELECT user_id, password FROM users WHERE email = $1";
-        const char *params[1] = {username};
-        PGresult *res = PQexecParams(page->app_widgets->db_conn, query, 1, NULL, params, NULL, NULL, 0);
-        
-        if (PQresultStatus(res) == PGRES_TUPLES_OK && PQntuples(res) > 0) {
-            const char *stored_password = PQgetvalue(res, 0, 1);
-            
-            // Check if the stored password is encrypted
-            int is_encrypted = 0;
-            for (int i = 0; stored_password[i] != '\0'; i++) {
-                if (stored_password[i] < 32 || stored_password[i] > 126) {
-                    is_encrypted = 1;
-                    break;
-                }
-            }
-            
-            if (is_encrypted) {
-                char decrypted_password[256];
-                xor_decrypt(stored_password, decrypted_password, strlen(stored_password));
-                decrypted_password[strlen(stored_password)] = '\0';
-                
-                if (strcmp(password, decrypted_password) == 0) {
-                    handle_successful_login(page->app_widgets, username);
-                } else {
-                    show_error_dialog(page->app_widgets->window, "Invalid username or password");
-                }
-            } else {
-                if (strcmp(password, stored_password) == 0) {
-                    handle_successful_login(page->app_widgets, username);
-                } else {
-                    show_error_dialog(page->app_widgets->window, "Invalid username or password");
-                }
-            }
-        } else {
-            show_error_dialog(page->app_widgets->window, "Invalid username or password");
+        // --- Send Login Request to Server --- //
+        LoginRequest login_req;
+        memset(&login_req, 0, sizeof(LoginRequest));
+        strncpy(login_req.username, username, sizeof(login_req.username) - 1);
+        strncpy(login_req.password, password, sizeof(login_req.password) - 1);
+        // Ensure null termination
+        login_req.username[sizeof(login_req.username) - 1] = '\0';
+        login_req.password[sizeof(login_req.password) - 1] = '\0';
+
+        Message *msg = create_message(MSG_LOGIN_REQUEST, &login_req, sizeof(LoginRequest));
+        if (!msg) {
+            fprintf(stderr, "❌ Failed to create login request message\n");
+            // Show error dialog? Or just log?
+            show_error_dialog(widgets->window, "Login failed: Could not create request");
+            return;
         }
-        PQclear(res);
+
+        if (send_message(widgets->server_socket, msg) < 0) {
+            fprintf(stderr, "❌ Failed to send login request message\n");
+            show_error_dialog(widgets->window, "Login failed: Could not send request to server");
+        }
+
+        free(msg);
+        // --- Request Sent - Wait for Response in receive_messages --- //
+        // Note: We don't switch pages or show errors here directly.
+        // The response from the server (MSG_LOGIN_SUCCESS/FAILURE)
+        // will trigger the next action in main.c's receive_messages loop.
+
+    } else {
+        // Handle empty username/password locally if desired
+        show_error_dialog(widgets->window, "Please enter both username and password");
     }
 }
 

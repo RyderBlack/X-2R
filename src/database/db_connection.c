@@ -55,7 +55,7 @@ PGconn* connect_to_db() {
 
     char conninfo[512];
     snprintf(conninfo, sizeof(conninfo),
-             "host=%s port=%s dbname=%s user=%s password=%s",
+             "host=%s port=%s dbname=%s user=%s password=%s sslmode=prefer",
              host, port, dbname, user, password);
 
     PGconn *conn = PQconnectdb(conninfo);

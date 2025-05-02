@@ -13,8 +13,9 @@ void update_chat_history(AppWidgets *widgets, const char *sender, const char *me
 // Function to update chat history from network messages
 gboolean update_chat_history_from_network(gpointer data);
 
-// Function to handle successful login
-void handle_successful_login(AppWidgets *widgets, const char *username);
+// Function to handle successful login confirmation from server and set up UI
+// Note: Renamed from handle_successful_login
+gboolean finalize_login_ui_setup(gpointer user_data);
 
 // Function to fetch the display name ("First Last") from DB
 void get_display_name(AppWidgets *widgets, const char *sender_email, char *display_name, size_t size);
@@ -30,5 +31,8 @@ void load_channel_history(AppWidgets *widgets, uint32_t channel_id);
 
 // Function to format timestamp (potentially move definition too)
 void format_timestamp(const char *db_timestamp, char *formatted_time, size_t size);
+
+// Function to update user status in the database
+void update_user_status(AppWidgets *widgets, const char *username, const char *status);
 
 #endif 

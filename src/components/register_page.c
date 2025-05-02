@@ -2,11 +2,12 @@
 #include "../types/app_types.h"
 #include "register_page.h"
 #include <string.h>
-#include "../database/db_connection.h"
-#include "../security/encryption.h"
 #include "../network/protocol.h"
 #include "../utils/string_utils.h"
 #include <stdlib.h>
+
+// Need utils for show_error_dialog
+#include "../utils/chat_utils.h"
 
 static void on_back_button_clicked(GtkButton *button, gpointer user_data) {
     RegisterPage *page = (RegisterPage *)user_data;
@@ -15,41 +16,50 @@ static void on_back_button_clicked(GtkButton *button, gpointer user_data) {
 
 static void on_register_button_clicked(GtkButton *button, gpointer user_data) {
     RegisterPage *page = (RegisterPage *)user_data;
+    AppWidgets *widgets = page->app_widgets; // Get AppWidgets
+
     const gchar *firstname = gtk_entry_get_text(GTK_ENTRY(page->firstname_entry));
     const gchar *lastname = gtk_entry_get_text(GTK_ENTRY(page->lastname_entry));
     const gchar *email = gtk_entry_get_text(GTK_ENTRY(page->email_entry));
     const gchar *password = gtk_entry_get_text(GTK_ENTRY(page->password_entry));
 
-    if (strlen(firstname) > 0 && strlen(lastname) > 0 && strlen(email) > 0 && strlen(password) > 0) {
-        // Check if email already exists
-        const char *check_query = "SELECT user_id FROM users WHERE email = $1";
-        const char *check_params[1] = {email};
-        PGresult *check_res = PQexecParams(page->app_widgets->db_conn, check_query, 1, NULL, check_params, NULL, NULL, 0);
-        
-        if (PQresultStatus(check_res) == PGRES_TUPLES_OK && PQntuples(check_res) > 0) {
-            show_error_dialog(page->app_widgets->window, "Email already exists");
-            PQclear(check_res);
-            return;
-        }
-        PQclear(check_res);
-        
-        // Encrypt password
-        char encrypted_password[256];
-        size_t password_len = strlen(password);
-        xor_encrypt(password, encrypted_password, password_len);
-        
-        // Insert new user
-        const char *insert_query = "INSERT INTO users (first_name, last_name, email, password, status) VALUES ($1, $2, $3, $4, 'offline')";
-        const char *insert_params[4] = {firstname, lastname, email, encrypted_password};
-        PGresult *insert_res = PQexecParams(page->app_widgets->db_conn, insert_query, 4, NULL, insert_params, NULL, NULL, 0);
-        
-        if (PQresultStatus(insert_res) == PGRES_COMMAND_OK) {
-            gtk_stack_set_visible_child_name(GTK_STACK(page->app_widgets->stack), "login");
-        } else {
-            show_error_dialog(page->app_widgets->window, "Registration failed");
-        }
-        PQclear(insert_res);
+    // Basic client-side validation
+    if (strlen(firstname) == 0 || strlen(lastname) == 0 || strlen(email) == 0 || strlen(password) == 0) {
+        show_error_dialog(widgets->window, "All fields are required");
+        return;
     }
+
+    // --- Send Registration Request to Server --- //
+    printf("🔒 Sending registration request for email: %s\n", email);
+    
+    RegisterRequest reg_req;
+    memset(&reg_req, 0, sizeof(RegisterRequest));
+    strncpy(reg_req.firstname, firstname, sizeof(reg_req.firstname) - 1);
+    strncpy(reg_req.lastname, lastname, sizeof(reg_req.lastname) - 1);
+    strncpy(reg_req.email, email, sizeof(reg_req.email) - 1);
+    strncpy(reg_req.password, password, sizeof(reg_req.password) - 1); // Send plain text
+    // Ensure null termination
+    reg_req.firstname[sizeof(reg_req.firstname) - 1] = '\0';
+    reg_req.lastname[sizeof(reg_req.lastname) - 1] = '\0';
+    reg_req.email[sizeof(reg_req.email) - 1] = '\0';
+    reg_req.password[sizeof(reg_req.password) - 1] = '\0';
+
+    Message *msg = create_message(MSG_REGISTER_REQUEST, &reg_req, sizeof(RegisterRequest));
+    if (!msg) {
+        fprintf(stderr, "❌ Failed to create registration request message\n");
+        show_error_dialog(widgets->window, "Registration failed: Could not create request");
+        return;
+    }
+
+    if (send_message(widgets->server_socket, msg) < 0) {
+        fprintf(stderr, "❌ Failed to send registration request message\n");
+        show_error_dialog(widgets->window, "Registration failed: Could not send request to server");
+    }
+
+    free(msg);
+    // --- Request Sent - Wait for Response in receive_messages --- //
+    // The response from the server (MSG_REGISTER_SUCCESS/FAILURE)
+    // will trigger the next action (e.g., showing dialog, switching page).
 }
 
 RegisterPage* register_page_new(AppWidgets *app_widgets) {
