@@ -160,10 +160,24 @@ static void on_channel_selected(GtkListBox *list, GtkListBoxRow *row, gpointer u
         return;
     }
     
-    // Update current channel
+    // Update current channel ID locally
     page->app_widgets->current_channel_id = new_channel_id;
+
+    // --- Notify server about the channel change --- //
+    printf("🚀 Sending JOIN_CHANNEL message for channel ID: %u\n", new_channel_id);
+    Message *join_msg = create_join_channel_message(new_channel_id);
+    if (join_msg) {
+        if (send_message(page->app_widgets->server_socket, join_msg) < 0) {
+            perror("Failed to send JOIN_CHANNEL message");
+            // Optionally show error to user?
+        }
+        free(join_msg);
+    } else {
+        fprintf(stderr, "Failed to create JOIN_CHANNEL message\n");
+    }
+    // --------------------------------------------- //
     
-    // Update channel name label
+    // Update channel name label locally
     char channel_id_str_verify[32];
     snprintf(channel_id_str_verify, sizeof(channel_id_str_verify), "%u", new_channel_id);
     const char *query = "SELECT name FROM channels WHERE channel_id = $1";

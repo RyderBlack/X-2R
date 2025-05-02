@@ -39,6 +39,8 @@ static void ensure_default_role(PGconn *db_conn);
 static gboolean on_window_delete(GtkWidget *widget, GdkEvent *event, gpointer data);
 void* receive_messages(void *arg);
 static gboolean show_login_error_idle(gpointer data);
+static gboolean show_registration_success_idle(gpointer data);
+static gboolean show_registration_failure_idle(gpointer data);
 
 // Function to sanitize UTF-8 strings for Pango
 // NOTE: Consider moving this to gtk_string_utils.c if not already there
@@ -228,6 +230,17 @@ void* receive_messages(void *arg) {
                 g_idle_add((GSourceFunc)show_login_error_idle, widgets);
                 break;
             }
+            case MSG_REGISTER_SUCCESS: {
+                printf("✅ Registration successful.\n");
+                g_idle_add((GSourceFunc)show_registration_success_idle, widgets);
+                break;
+            }
+            case MSG_REGISTER_FAILURE: {
+                 printf("❌ Registration failed.\n");
+                 // TODO: Server could send back a reason (e.g., email exists) in payload
+                 g_idle_add((GSourceFunc)show_registration_failure_idle, widgets);
+                 break;
+            }
             case MSG_CHAT: {
                 ChatMessage *chat_msg = (ChatMessage *)msg->payload;
 
@@ -264,6 +277,38 @@ void* receive_messages(void *arg) {
 static gboolean show_login_error_idle(gpointer data) {
     AppWidgets *widgets = (AppWidgets *)data;
     show_error_dialog(widgets->window, "Invalid username or password");
+    return G_SOURCE_REMOVE; // Run only once
+}
+
+// Helper function for registration success
+static gboolean show_registration_success_idle(gpointer data) {
+    AppWidgets *widgets = (AppWidgets *)data;
+    // Show a success message
+    GtkWidget *dialog = gtk_message_dialog_new(GTK_WINDOW(widgets->window),
+                                               GTK_DIALOG_DESTROY_WITH_PARENT,
+                                               GTK_MESSAGE_INFO,
+                                               GTK_BUTTONS_OK,
+                                               "Registration successful! You can now log in.");
+    gtk_dialog_run(GTK_DIALOG(dialog));
+    gtk_widget_destroy(dialog);
+
+    // Switch to the login page
+    gtk_stack_set_visible_child_name(GTK_STACK(widgets->stack), "login");
+    
+    // Clear registration form fields (optional but good practice)
+    gtk_entry_set_text(GTK_ENTRY(widgets->register_firstname_entry), "");
+    gtk_entry_set_text(GTK_ENTRY(widgets->register_lastname_entry), "");
+    gtk_entry_set_text(GTK_ENTRY(widgets->register_email_entry), "");
+    gtk_entry_set_text(GTK_ENTRY(widgets->register_password_entry), "");
+    
+    return G_SOURCE_REMOVE; // Run only once
+}
+
+// Helper function for registration failure
+static gboolean show_registration_failure_idle(gpointer data) {
+    AppWidgets *widgets = (AppWidgets *)data;
+    // TODO: Use specific error from server if provided in payload
+    show_error_dialog(widgets->window, "Registration failed. Email might already exist.");
     return G_SOURCE_REMOVE; // Run only once
 }
 

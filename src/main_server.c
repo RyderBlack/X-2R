@@ -32,6 +32,7 @@ typedef struct {
     int socket;
     PGconn *db_conn;
     char authenticated_username[50]; // Store username after successful login
+    uint32_t current_channel_id;     // Channel the client is currently viewing
 } ClientData;
 
 // --- Global Client List Management ---
@@ -62,20 +63,27 @@ void remove_client(ClientData* client) {
     pthread_mutex_unlock(&client_list_mutex);
 }
 
-// Broadcast a message to all other authenticated clients
-// TODO: Add channel filtering later
+// Broadcast a message only to authenticated clients in the correct channel
 void broadcast_message(Message* msg, int sender_socket) {
+    // We need the payload to check the channel ID
+    if (msg->type != MSG_CHAT || msg->length < sizeof(ChatMessage)) {
+        fprintf(stderr, "Attempted to broadcast non-chat or invalid chat message.\n");
+        return; 
+    }
+    ChatMessage* chat_payload = (ChatMessage*)msg->payload;
+    uint32_t target_channel_id = chat_payload->channel_id;
+
     pthread_mutex_lock(&client_list_mutex);
     for (int i = 0; i < MAX_CLIENTS; i++) {
         if (client_list[i] != NULL && 
             client_list[i]->socket != sender_socket && 
-            client_list[i]->authenticated_username[0] != '\0') 
+            client_list[i]->authenticated_username[0] != '\0' &&
+            client_list[i]->current_channel_id == target_channel_id) // <-- Check channel ID!
         {
-            // Check if recipient should receive (e.g., same channel - ADD LATER)
-            // For now, send to all other authenticated users
             if (send_message(client_list[i]->socket, msg) < 0) {
-                perror("Broadcast send failed"); 
-                // Handle failed send? Maybe mark client for removal?
+                perror("Broadcast send failed to socket"); 
+                // Consider removing the client if send fails repeatedly
+                // remove_client(client_list[i]); // Be careful with locking/iteration if you do this
             }
         }
     }
@@ -99,11 +107,8 @@ void* handle_client(void* arg) {
     ClientData *data = (ClientData *)arg;
     int client_socket = data->socket;
     PGconn *conn = data->db_conn;
-    // Important: Initialize authenticated_username or ensure it's zeroed
     memset(data->authenticated_username, 0, sizeof(data->authenticated_username));
-
-    // Add self to the client list upon starting the thread
-    //add_client(data); // Moved adding client to main after thread creation succeeds
+    data->current_channel_id = 0; // Initialize channel ID
 
     printf("📥 New thread started for client socket %d\n", client_socket);
 
@@ -202,24 +207,138 @@ void* handle_client(void* arg) {
                 break;
             }
 
-            case MSG_CHAT: {
-                 // Ensure user is authenticated before processing chat messages
-                if (!data->authenticated_username[0]) {
-                    fprintf(stderr, "Warning: Unauthenticated user on socket %d tried to send chat message.\n", client_socket);
-                    // Optionally send an error back
+            case MSG_REGISTER_REQUEST: {
+                // Can only register if not already logged in
+                if (data->authenticated_username[0]) {
+                    fprintf(stderr, "Warning: Logged in user (%s) sent REGISTER_REQUEST on socket %d\n", data->authenticated_username, client_socket);
+                    // Send failure? Or just ignore?
+                    Message *response = create_message(MSG_REGISTER_FAILURE, NULL, 0); // Generic failure
+                    if (response) {
+                        send_message(client_socket, response);
+                        free(response);
+                    }
                     break;
                 }
 
-                ChatMessage* chat = (ChatMessage*)msg->payload;
-                // *** IMPORTANT: Overwrite sender username with authenticated username ***
-                strncpy(chat->sender_username, data->authenticated_username, sizeof(chat->sender_username) - 1);
-                 chat->sender_username[sizeof(chat->sender_username) - 1] = '\0'; // Ensure null termination
+                RegisterRequest *req = (RegisterRequest*)msg->payload;
+                printf("🔐 Registration attempt for email: %s\n", req->email);
 
-                printf("💬 Broadcasting [Channel %u] %s: %s (from socket %d)\n", chat->channel_id, chat->sender_username, chat->content, client_socket);
+                // --- Database Registration Logic --- //
+                bool registration_ok = false;
+                bool email_exists = false;
 
-                // Broadcast the message instead of echoing
-                broadcast_message(msg, client_socket);
+                // 1. Check if email exists
+                const char *check_query = "SELECT 1 FROM users WHERE email = $1";
+                const char *check_params[1] = {req->email};
+                PGresult *check_res = PQexecParams(conn, check_query, 1, NULL, check_params, NULL, NULL, 0);
+                if (PQresultStatus(check_res) == PGRES_TUPLES_OK) {
+                    if (PQntuples(check_res) > 0) {
+                        email_exists = true;
+                    }
+                } else {
+                    fprintf(stderr, "DB Error checking email %s: %s\n", req->email, PQerrorMessage(conn));
+                    // Send generic failure
+                     Message *response = create_message(MSG_REGISTER_FAILURE, NULL, 0);
+                    if (response) {
+                        send_message(client_socket, response);
+                        free(response);
+                    }
+                    PQclear(check_res);
+                    break; // Exit case on DB error
+                }
+                 PQclear(check_res);
+
+                // 2. If email doesn't exist, proceed with insertion
+                if (!email_exists) {
+                    // Encrypt password server-side
+                    char encrypted_password[256]; // Ensure sufficient size
+                    size_t password_len = strlen(req->password);
+                     // Be careful with buffer sizes if password can be long
+                    if (password_len >= sizeof(encrypted_password)) { 
+                        fprintf(stderr, "Error: Password too long for encryption buffer.\n");
+                        // Send generic failure
+                        Message *response = create_message(MSG_REGISTER_FAILURE, NULL, 0);
+                        if (response) {
+                             send_message(client_socket, response);
+                            free(response);
+                        }
+                        break; // Exit case
+                    }
+                    xor_encrypt(req->password, encrypted_password, password_len);
+                    // IMPORTANT: xor_encrypt might not null-terminate if input fills buffer.
+                    // If storing as text/varchar, it might be okay if length is managed.
+                    // If storing as bytea, null termination isn't needed, but send length.
+                    // Assuming VARCHAR storage for now.
+                    encrypted_password[password_len] = '\0'; // Null-terminate for safety if needed by DB/later use
+
+                    // Insert new user
+                    const char *insert_query = "INSERT INTO users (first_name, last_name, email, password, status) VALUES ($1, $2, $3, $4, 'offline')";
+                    // Use the encrypted password
+                    const char *insert_params[4] = {req->firstname, req->lastname, req->email, encrypted_password};
+                    PGresult *insert_res = PQexecParams(conn, insert_query, 4, NULL, insert_params, NULL, NULL, 0);
+
+                    if (PQresultStatus(insert_res) == PGRES_COMMAND_OK) {
+                        registration_ok = true;
+                    } else {
+                        fprintf(stderr, "DB Error inserting user %s: %s\n", req->email, PQerrorMessage(conn));
+                    }
+                    PQclear(insert_res);
+                }
+                // --------------------------------- //
+
+                if (registration_ok) {
+                    printf("✅ Registration successful for %s\n", req->email);
+                    // Send success response
+                    Message *response = create_message(MSG_REGISTER_SUCCESS, NULL, 0);
+                    if (response) {
+                        send_message(client_socket, response);
+                        free(response);
+                    }
+                } else {
+                    printf("❌ Registration failed for %s (Email exists: %s)\n", req->email, email_exists ? "Yes" : "No");
+                    // Send failure response (could add payload with specific reason)
+                    Message *response = create_message(MSG_REGISTER_FAILURE, NULL, 0); 
+                     if (response) {
+                        send_message(client_socket, response);
+                        free(response);
+                    }
+                }
                 break;
+            }
+
+            case MSG_JOIN_CHANNEL: { // Handle channel joining
+                if (!data->authenticated_username[0]) {
+                     fprintf(stderr, "Warning: Unauthenticated user tried to join channel.\n");
+                     break;
+                }
+                if (msg->length >= sizeof(uint32_t)) {
+                    uint32_t requested_channel_id = *((uint32_t*)msg->payload);
+                    // TODO: Add server-side validation: Does channel exist? Does user have permission?
+                    data->current_channel_id = requested_channel_id;
+                    printf("👤 User %s (socket %d) joined channel %u\n", data->authenticated_username, client_socket, data->current_channel_id);
+                } else {
+                    fprintf(stderr, "Warning: Received invalid MSG_JOIN_CHANNEL payload size from socket %d\n", client_socket);
+                }
+                break;
+            }
+
+            case MSG_CHAT: {
+                 if (!data->authenticated_username[0]) {
+                    fprintf(stderr, "Warning: Unauthenticated user tried to send chat message.\n");
+                    break;
+                 }
+                 
+                 ChatMessage* chat = (ChatMessage*)msg->payload;
+                 // Ensure the message is for the channel the client *claims* to be in?
+                 // Or just trust the client sent it to the right place initially?
+                 // For now, we'll trust the payload's channel_id for broadcasting.
+                 
+                 strncpy(chat->sender_username, data->authenticated_username, sizeof(chat->sender_username) - 1);
+                 chat->sender_username[sizeof(chat->sender_username) - 1] = '\0';
+
+                 printf("💬 Broadcasting [Channel %u] %s: %s (from socket %d)\n", chat->channel_id, chat->sender_username, chat->content, client_socket);
+                 broadcast_message(msg, client_socket);
+                 break;
             }
 
             default: {
