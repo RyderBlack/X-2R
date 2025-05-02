@@ -64,3 +64,4 @@ build/
 
 .env
 *.env
+*.env.*
