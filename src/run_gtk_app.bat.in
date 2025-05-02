@@ -51,12 +51,12 @@ for %%F in (
     )
 )
 
-:: Copy .env
-if exist "%CMAKE_SOURCE_DIR%\.env" (
-    copy "%CMAKE_SOURCE_DIR%\.env" "%~dp0"
-    echo Copied .env
+:: Copy .env.client for the client app
+if exist "%CMAKE_SOURCE_DIR%\.env.client" (
+    copy "%CMAKE_SOURCE_DIR%\.env.client" "%~dp0"
+    echo Copied .env.client
 ) else (
-    echo WARNING: .env not found in project root
+    echo WARNING: .env.client not found in project root
 )
 
 :: Copy app.css

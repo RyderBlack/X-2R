@@ -26,6 +26,9 @@ typedef enum {
     MSG_JOIN_CHANNEL,
     MSG_LEAVE_CHANNEL,
     MSG_REGISTER,
+    MSG_LOGIN_REQUEST,
+    MSG_LOGIN_SUCCESS,
+    MSG_LOGIN_FAILURE,
     MSG_ERROR
 } MessageType;
 
@@ -65,6 +68,15 @@ typedef struct {
     char name[64];
     bool is_private;
 } ChannelInfo;
+
+typedef struct {
+    char username[50];
+    char password[50];
+} LoginRequest;
+
+typedef struct {
+    char username[50];
+} LoginSuccessResponse;
 
 typedef struct {
     MessageType type;

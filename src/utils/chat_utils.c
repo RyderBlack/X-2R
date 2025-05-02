@@ -384,112 +384,140 @@ void refresh_channel_list(AppWidgets *widgets) {
     gtk_widget_show_all(widgets->chat_channels_list);
 }
 
-void handle_successful_login(AppWidgets *widgets, const char *username) {
-    // Update user status to online
-    const char *update_query = "UPDATE users SET status = 'online' WHERE email = $1";
-    const char *update_params[1] = {username};
-    PGresult *update_res = PQexecParams(widgets->db_conn, update_query, 1, NULL, update_params, NULL, NULL, 0);
-    PQclear(update_res);
-    
-    // Store username
+// Renamed from handle_successful_login
+// This function is now called via g_idle_add from receive_messages
+// after the server confirms login with MSG_LOGIN_SUCCESS.
+// It takes the confirmed username as input (needs casting and freeing).
+gboolean finalize_login_ui_setup(gpointer user_data) {
+    char *username = (char *)user_data; // Cast the username passed from g_idle_add
+    if (!username) return G_SOURCE_REMOVE;
+
+    // Find the AppWidgets pointer (assuming it's stored on the main window)
+    // This is a common pattern, but might need adjustment if AppWidgets isn't stored this way.
+    GList *toplevels = gtk_window_list_toplevels();
+    AppWidgets *widgets = NULL;
+    for (GList *l = toplevels; l != NULL; l = l->next) {
+        widgets = (AppWidgets *)g_object_get_data(G_OBJECT(l->data), "widgets");
+        if (widgets) break; // Found it
+    }
+    g_list_free(toplevels);
+
+    if (!widgets) {
+        fprintf(stderr, "Error: Could not find AppWidgets pointer in finalize_login_ui_setup\n");
+        g_free(username); // Free the username string
+        return G_SOURCE_REMOVE; // Don't run again
+    }
+
+    printf("🚀 Finalizing UI setup for user: %s\n", username);
+
+    // 1. Store username locally in AppWidgets
     strncpy(widgets->username, username, sizeof(widgets->username) - 1);
     widgets->username[sizeof(widgets->username) - 1] = '\0';
-    
-    // Get user_id for the current user
+
+    // Update the user display label
+    if (widgets->user_display_label) {
+        char label_text[100];
+        snprintf(label_text, sizeof(label_text), "Logged in as: %s", widgets->username);
+        gtk_label_set_text(GTK_LABEL(widgets->user_display_label), label_text);
+    }
+
+    // 2. Database operations (like ensuring channels exist) might still be needed
+    //    but status update is now handled by the server.
+    //    Let's keep the channel check/creation logic for now.
     const char *get_user_query = "SELECT user_id FROM users WHERE email = $1";
     const char *get_user_params[1] = {username};
     PGresult *user_res = PQexecParams(widgets->db_conn, get_user_query, 1, NULL, get_user_params, NULL, NULL, 0);
-    
-    int channels_created = 0;
-    
+
     if (PQresultStatus(user_res) == PGRES_TUPLES_OK && PQntuples(user_res) > 0) {
         const char *user_id_str = PQgetvalue(user_res, 0, 0);
-        
-        printf("👤 Found user ID %s for %s\n", user_id_str, username);
-        
-        // Create default channels if they don't exist
-        const char *channels[] = {
-            "general",
-            "movies and tv shows",
-            "memes",
-            "music",
-            "foodies"
-        };
-        
+        printf("👤 Found user ID %s for %s during UI setup\n", user_id_str, username);
+
+        // Create default channels if they don't exist (can be debated if client should do this)
+        const char *channels[] = {"general", "movies and tv shows", "memes", "music", "foodies"};
         for (int i = 0; i < 5; i++) {
             const char *check_channel_query = "SELECT channel_id FROM channels WHERE name = $1";
             const char *check_params[1] = {channels[i]};
             PGresult *check_res = PQexecParams(widgets->db_conn, check_channel_query, 1, NULL, check_params, NULL, NULL, 0);
-            
+
             if (PQresultStatus(check_res) == PGRES_TUPLES_OK && PQntuples(check_res) == 0) {
-                printf("➕ Creating new channel: %s\n", channels[i]);
-                
+                printf("➕ Creating new channel (client-side check): %s\n", channels[i]);
                 const char *create_channel_query = "INSERT INTO channels (name, is_private, created_by) VALUES ($1, FALSE, $2) RETURNING channel_id";
                 const char *create_params[2] = {channels[i], user_id_str};
                 PGresult *create_res = PQexecParams(widgets->db_conn, create_channel_query, 2, NULL, create_params, NULL, NULL, 0);
-                
+
                 if (PQresultStatus(create_res) == PGRES_TUPLES_OK && PQntuples(create_res) > 0) {
-                    channels_created++;
                     printf("✅ Channel created with ID: %s\n", PQgetvalue(create_res, 0, 0));
-                    
-                    // Add user to the created channel with user_channels relation
+                    // Add user to the created channel
                     const char *add_user_query = "INSERT INTO user_channels (user_id, channel_id, role_id) VALUES ($1, $2, 1)";
                     const char *add_user_params[2] = {user_id_str, PQgetvalue(create_res, 0, 0)};
                     PGresult *add_user_res = PQexecParams(widgets->db_conn, add_user_query, 2, NULL, add_user_params, NULL, NULL, 0);
-                    
                     if (PQresultStatus(add_user_res) != PGRES_COMMAND_OK) {
-                        printf("⚠️ Failed to add user to channel: %s\n", PQerrorMessage(widgets->db_conn));
+                         printf("⚠️ Failed to add user to channel: %s\n", PQerrorMessage(widgets->db_conn));
                     }
-                    
                     PQclear(add_user_res);
                 } else {
                     printf("❌ Failed to create channel: %s\n", PQerrorMessage(widgets->db_conn));
                 }
-                
                 PQclear(create_res);
             }
             PQclear(check_res);
         }
-        
-        // Get the general channel ID
+
+        // Get the general channel ID to set as default
         const char *get_general_query = "SELECT channel_id FROM channels WHERE name = 'general'";
         PGresult *general_res = PQexec(widgets->db_conn, get_general_query);
-        
         if (PQresultStatus(general_res) == PGRES_TUPLES_OK && PQntuples(general_res) > 0) {
             widgets->current_channel_id = (uint32_t)atoi(PQgetvalue(general_res, 0, 0));
-            printf("✅ Default channel ID set to: %u\n", widgets->current_channel_id);
+             printf("✅ Default channel ID set to: %u\n", widgets->current_channel_id);
         } else {
-            printf("⚠️ Default channel not found\n");
+            printf("⚠️ Default channel 'general' not found during UI setup\n");
+            widgets->current_channel_id = 0; // Reset if not found
         }
         PQclear(general_res);
+    } else {
+        printf("❌ Could not find user ID for %s during UI setup\n", username);
+         widgets->current_channel_id = 0; // Reset channel ID if user lookup fails
     }
     PQclear(user_res);
-    
-    // Switch to chat view
+
+    // 3. Switch to chat view
     gtk_stack_set_visible_child_name(GTK_STACK(widgets->stack), "chat");
-    
-    // Refresh the channel list
+
+    // 4. Refresh the channel list UI
     refresh_channel_list(widgets);
-    
-    // Load channel history for general channel
+
+    // 5. Load channel history for the default/selected channel
     if (widgets->current_channel_id > 0) {
         load_channel_history(widgets, widgets->current_channel_id);
-        
+
         // Update channel name label
         const char *get_name_query = "SELECT name FROM channels WHERE channel_id = $1";
         char channel_id_str[32];
         snprintf(channel_id_str, sizeof(channel_id_str), "%u", widgets->current_channel_id);
         const char *params[1] = {channel_id_str};
         PGresult *name_res = PQexecParams(widgets->db_conn, get_name_query, 1, NULL, params, NULL, NULL, 0);
-        
+
         if (PQresultStatus(name_res) == PGRES_TUPLES_OK && PQntuples(name_res) > 0) {
-            char label_text[64];
+            char label_text[128]; // Increased size slightly
             snprintf(label_text, sizeof(label_text), "# %s", PQgetvalue(name_res, 0, 0));
             gtk_label_set_text(GTK_LABEL(widgets->channel_name), label_text);
         }
-        
         PQclear(name_res);
+    } else {
+        // If no default channel selected (e.g., 'general' didn't exist or user lookup failed)
+        // Set channel name label appropriately
+        gtk_label_set_text(GTK_LABEL(widgets->channel_name), "# Select a channel");
+        // Clear chat history explicitly if needed
+        GtkListBox *list_box = GTK_LIST_BOX(widgets->chat_history);
+        GList *children = gtk_container_get_children(GTK_CONTAINER(list_box));
+        for (GList *iter = children; iter != NULL; iter = iter->next) {
+            gtk_widget_destroy(GTK_WIDGET(iter->data));
+        }
+        g_list_free(children);
     }
+
+    g_free(username); // Free the username string passed via g_idle_add
+    return G_SOURCE_REMOVE; // Run only once
 }
 
 // Function to format timestamp

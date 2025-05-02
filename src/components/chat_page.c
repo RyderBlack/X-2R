@@ -207,6 +207,15 @@ ChatPage* chat_page_new(AppWidgets *app_widgets) {
     gtk_container_add(GTK_CONTAINER(channels_scroll), page->chat_channels_list);
     gtk_box_pack_start(GTK_BOX(channels_box), channels_scroll, TRUE, TRUE, 0);
 
+    // Add User display label above the logout button
+    // Initialize with placeholder - will be updated on login
+    page->app_widgets->user_display_label = gtk_label_new("Logged in as:"); 
+    gtk_widget_set_name(page->app_widgets->user_display_label, "user-display-label");
+    gtk_widget_set_halign(page->app_widgets->user_display_label, GTK_ALIGN_START);
+    gtk_widget_set_margin_start(page->app_widgets->user_display_label, 10);
+    gtk_widget_set_margin_end(page->app_widgets->user_display_label, 10);
+    gtk_box_pack_end(GTK_BOX(channels_box), page->app_widgets->user_display_label, FALSE, FALSE, 5); // Pack before logout
+
     // Add Logout button at the bottom of the channels box
     page->logout_button = gtk_button_new_with_label("Logout");
     gtk_widget_set_name(page->logout_button, "logout-button");

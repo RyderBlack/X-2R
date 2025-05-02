@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h> // <-- NEW!
+#include <stdbool.h> // <-- ADD THIS FOR bool, true, false
 #ifdef _WIN32
 #include <winsock2.h>
 #include <ws2tcpip.h>
@@ -20,58 +21,235 @@ typedef int socklen_t;
 #include "config/env_loader.h"
 #include "database/db_connection.h"
 #include "network/protocol.h"
+#include "security/encryption.h" // Include for decryption
 
 #define PORT 8080
 #define BUFFER_SIZE 1024
+#define MAX_CLIENTS 100 // Define max concurrent clients
 
 // Structure to pass data to client handler thread
 typedef struct {
     int socket;
     PGconn *db_conn;
+    char authenticated_username[50]; // Store username after successful login
 } ClientData;
+
+// --- Global Client List Management ---
+ClientData* client_list[MAX_CLIENTS];
+pthread_mutex_t client_list_mutex;
+
+// Add a client to the global list
+void add_client(ClientData* client) {
+    pthread_mutex_lock(&client_list_mutex);
+    for (int i = 0; i < MAX_CLIENTS; i++) {
+        if (client_list[i] == NULL) {
+            client_list[i] = client;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&client_list_mutex);
+}
+
+// Remove a client from the global list
+void remove_client(ClientData* client) {
+    pthread_mutex_lock(&client_list_mutex);
+    for (int i = 0; i < MAX_CLIENTS; i++) {
+        if (client_list[i] == client) {
+            client_list[i] = NULL;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&client_list_mutex);
+}
+
+// Broadcast a message to all other authenticated clients
+// TODO: Add channel filtering later
+void broadcast_message(Message* msg, int sender_socket) {
+    pthread_mutex_lock(&client_list_mutex);
+    for (int i = 0; i < MAX_CLIENTS; i++) {
+        if (client_list[i] != NULL && 
+            client_list[i]->socket != sender_socket && 
+            client_list[i]->authenticated_username[0] != '\0') 
+        {
+            // Check if recipient should receive (e.g., same channel - ADD LATER)
+            // For now, send to all other authenticated users
+            if (send_message(client_list[i]->socket, msg) < 0) {
+                perror("Broadcast send failed"); 
+                // Handle failed send? Maybe mark client for removal?
+            }
+        }
+    }
+    pthread_mutex_unlock(&client_list_mutex);
+}
+// ------------------------------------
+
+// Function to update user status (moved here or keep in a utils file? Let's put a simple version here for now)
+static void update_user_db_status(PGconn *conn, const char *username, const char *status) {
+    const char *update_query = "UPDATE users SET status = $1 WHERE email = $2";
+    const char *params[2] = {status, username};
+    PGresult *res = PQexecParams(conn, update_query, 2, NULL, params, NULL, NULL, 0);
+    if (PQresultStatus(res) != PGRES_COMMAND_OK) {
+        fprintf(stderr, "DB Status Update Error for %s: %s\n", username, PQerrorMessage(conn));
+    }
+    PQclear(res);
+}
 
 // Thread function for handling a client
 void* handle_client(void* arg) {
     ClientData *data = (ClientData *)arg;
     int client_socket = data->socket;
     PGconn *conn = data->db_conn;
-    free(data);
+    // Important: Initialize authenticated_username or ensure it's zeroed
+    memset(data->authenticated_username, 0, sizeof(data->authenticated_username));
+
+    // Add self to the client list upon starting the thread
+    //add_client(data); // Moved adding client to main after thread creation succeeds
 
     printf("📥 New thread started for client socket %d\n", client_socket);
 
     while (1) {
         Message* msg = receive_message(client_socket);
         if (!msg) {
-            printf("❌ Client disconnected or error on socket %d\n", client_socket);
+            printf("❌ Client disconnected or error on socket %d (User: %s)\n", client_socket, data->authenticated_username[0] ? data->authenticated_username : "Unauthenticated");
+            // If user was authenticated, update status to offline
+            if (data->authenticated_username[0]) {
+                update_user_db_status(conn, data->authenticated_username, "offline");
+            }
             break;
         }
 
-        printf("📝 Received message type: %d, length: %u\n", msg->type, msg->length);
+        printf("📝 Received message type: %d, length: %u from socket %d\n", msg->type, msg->length, client_socket);
 
-        if (msg->type == MSG_CHAT) {
-            ChatMessage* chat = (ChatMessage*)msg->payload;
-            printf("💬 [Channel %u] %s: %s\n", chat->channel_id, chat->sender_username, chat->content);
+        switch (msg->type) {
+            case MSG_LOGIN_REQUEST: {
+                // Prevent multiple login attempts on the same connection
+                if (data->authenticated_username[0]) {
+                    fprintf(stderr, "Warning: Already logged in user (%s) sent LOGIN_REQUEST on socket %d\n", data->authenticated_username, client_socket);
+                    // Optionally send an error or just ignore
+                    break;
+                }
 
-            // Echo message back to client
-            send_message(client_socket, msg);
-            printf("📤 Echoed chat message back to client.\n");
-        } else {
-            printf("❓ Received non-chat message, ignoring.\n");
+                LoginRequest *req = (LoginRequest*)msg->payload;
+                printf("🔐 Login attempt for user: %s on socket %d\n", req->username, client_socket);
+
+                // --- Database Authentication --- //
+                const char *query = "SELECT user_id, password FROM users WHERE email = $1";
+                const char *params[1] = {req->username};
+                PGresult *res = PQexecParams(conn, query, 1, NULL, params, NULL, NULL, 0);
+
+                bool login_ok = false;
+                if (PQresultStatus(res) == PGRES_TUPLES_OK && PQntuples(res) > 0) {
+                    const char *stored_password_encrypted = PQgetvalue(res, 0, 1);
+                    // Basic check if password looks encrypted (adjust if needed)
+                    int is_encrypted = 0;
+                    for (int i = 0; stored_password_encrypted[i] != '\0'; i++) {
+                        if (stored_password_encrypted[i] < 32 || stored_password_encrypted[i] > 126) {
+                            is_encrypted = 1;
+                            break;
+                        }
+                    }
+
+                    if (is_encrypted) {
+                        char decrypted_password[256];
+                        size_t encrypted_len = strlen(stored_password_encrypted); // Use actual length if possible
+                        xor_decrypt(stored_password_encrypted, decrypted_password, encrypted_len);
+                         // Ensure null termination if decrypt doesn't guarantee it
+                        decrypted_password[encrypted_len] = '\0'; // Be cautious here, might overwrite valid data if original wasn't simple XOR
+
+                        if (strcmp(req->password, decrypted_password) == 0) {
+                            login_ok = true;
+                        }
+                    } else {
+                        // Handle plain text password comparison (legacy? should migrate)
+                         if (strcmp(req->password, stored_password_encrypted) == 0) {
+                            login_ok = true;
+                        }
+                    }
+                }
+                PQclear(res);
+                // ----------------------------- //
+
+                if (login_ok) {
+                    printf("✅ Login successful for %s on socket %d\n", req->username, client_socket);
+                    // Store authenticated username
+                    strncpy(data->authenticated_username, req->username, sizeof(data->authenticated_username) - 1);
+                    data->authenticated_username[sizeof(data->authenticated_username) - 1] = '\0'; // Ensure null termination
+
+                    // Update DB status to online
+                    update_user_db_status(conn, data->authenticated_username, "online");
+
+                    // Add client to list *after* successful authentication
+                    add_client(data); 
+
+                    // Send success response
+                    LoginSuccessResponse resp_payload;
+                    strncpy(resp_payload.username, data->authenticated_username, sizeof(resp_payload.username) -1 );
+                    resp_payload.username[sizeof(resp_payload.username)-1] = '\0';
+                    Message *response = create_message(MSG_LOGIN_SUCCESS, &resp_payload, sizeof(LoginSuccessResponse));
+                    if (response) {
+                         send_message(client_socket, response);
+                         free(response);
+                    }
+                } else {
+                    printf("❌ Login failed for user: %s on socket %d\n", req->username, client_socket);
+                    // Send failure response
+                    Message *response = create_message(MSG_LOGIN_FAILURE, NULL, 0);
+                     if (response) {
+                         send_message(client_socket, response);
+                         free(response);
+                    }
+                }
+                break;
+            }
+
+            case MSG_CHAT: {
+                 // Ensure user is authenticated before processing chat messages
+                if (!data->authenticated_username[0]) {
+                    fprintf(stderr, "Warning: Unauthenticated user on socket %d tried to send chat message.\n", client_socket);
+                    // Optionally send an error back
+                    break;
+                }
+
+                ChatMessage* chat = (ChatMessage*)msg->payload;
+                // *** IMPORTANT: Overwrite sender username with authenticated username ***
+                strncpy(chat->sender_username, data->authenticated_username, sizeof(chat->sender_username) - 1);
+                 chat->sender_username[sizeof(chat->sender_username) - 1] = '\0'; // Ensure null termination
+
+                printf("💬 Broadcasting [Channel %u] %s: %s (from socket %d)\n", chat->channel_id, chat->sender_username, chat->content, client_socket);
+
+                // Broadcast the message instead of echoing
+                broadcast_message(msg, client_socket);
+                break;
+            }
+
+            default: {
+                printf("❓ Received unhandled message type %d from socket %d (User: %s)\n", msg->type, client_socket, data->authenticated_username[0] ? data->authenticated_username : "Unauthenticated");
+                break;
+            }
         }
 
         free(msg);
     }
 
+    // Cleanup: Remove client from list and close socket
+    remove_client(data); // Remove from global list
     CLOSESOCKET(client_socket);
-    printf("🔒 Connection closed for socket %d\n", client_socket);
-
+    printf("🔒 Connection closed for socket %d (User: %s)\n", client_socket, data->authenticated_username[0] ? data->authenticated_username : "Previously Unauthenticated");
+    free(data); // Free the ClientData struct itself
     pthread_exit(NULL);
 }
 
 int main(int argc, char *argv[]) {
-    // Load environment variables from the .env file
-    if (!load_env(".env")) {
-        fprintf(stderr, "Failed to load .env file\n");
+    // Initialize client list and mutex
+    memset(client_list, 0, sizeof(client_list));
+    if (pthread_mutex_init(&client_list_mutex, NULL) != 0) {
+        perror("Mutex initialization failed");
+        return EXIT_FAILURE;
+    }
+
+    // Load environment variables from the SERVER configuration file
+    if (!load_env(".env.server")) { 
+        fprintf(stderr, "Failed to load server configuration .env.server\n");
         return EXIT_FAILURE;
     }
 
@@ -151,6 +329,8 @@ int main(int argc, char *argv[]) {
             continue;
         }
         data->db_conn = conn;
+        // Initialize the username field before passing to thread
+        memset(data->authenticated_username, 0, sizeof(data->authenticated_username));
 
         printf("🔗 Accepted connection, socket %d\n", data->socket);
 
@@ -162,10 +342,13 @@ int main(int argc, char *argv[]) {
             free(data);
             continue;
         }
-
+        // Don't add client here, add inside the thread upon successful login
+        //add_client(data); 
         pthread_detach(thread_id);
     }
 
+    // Cleanup
+    pthread_mutex_destroy(&client_list_mutex);
     PQfinish(conn);
     CLOSESOCKET(server_fd);
 
