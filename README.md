@@ -1,4 +1,8 @@
-# <img src="icon.png" alt="X-2R Logo" width="50" height="50"/> X-2R
+<p align="center">
+  <img src="icon.png" alt="X-2R Logo" width="500" height="500"/>
+</p>
+
+# X-2R
 
 A Discord-like chat application built in C as a learning project.
 
@@ -45,7 +49,7 @@ The application mimics some basic functionalities found in platforms like Discor
 
 1.  **Clone the repository:**
     ```bash
-    git clone <your-repo-url>
+    git clone https://github.com/RyderBlack/X-2R.git
     cd X-2R
     ```
 2.  **Configure Environment Variables:**
@@ -93,7 +97,7 @@ A pre-compiled `.exe` file for the client might be available for direct download
 
 ## 📄 License
 
-[Specify your license here, e.g., MIT License]
+[under MIT License]
 
 ---
 
